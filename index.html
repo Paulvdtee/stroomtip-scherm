@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Stroomtip</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Vanaf het beginscherm start dit zonder Safari-balken, als een echte app. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Stroomtip">
+<style>
+/* Geschreven voor Safari 12 (iPad Air 1, iOS 12.5.8): dus grid mag, maar
+   geen gap in flexbox, geen ?. en geen automatische donkere modus. */
+:root {
+  --grond: #10151c;
+  --kaart: #1a212b;
+  --rand: #2a3441;
+  --tekst: #e8edf3;
+  --gedempt: #8b98a8;
+  --nu: #4ade80;
+  --nu-dof: #14432a;
+  --straks: #fbbf24;
+  --duur: #f87171;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; height: 100%; overflow: hidden;
+  background: var(--grond); color: var(--tekst);
+  font-family: -apple-system, "Helvetica Neue", Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none; user-select: none;
+}
+body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
+
+/* Kopregel */
+.kop { display: flex; justify-content: space-between; align-items: baseline;
+       margin-bottom: 14px; }
+.datum { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.klok { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.klok .prijs { color: var(--gedempt); font-size: 20px; font-weight: 400;
+               margin-left: 14px; }
+
+/* De twee apparaten */
+.apparaten { display: -webkit-box; display: flex; -webkit-box-flex: 1;
+             flex: 1 1 auto; min-height: 0; }
+.kaart {
+  -webkit-box-flex: 1; flex: 1 1 0; min-width: 0;
+  background: var(--kaart); border: 2px solid var(--rand); border-radius: 18px;
+  padding: 20px 26px 22px; display: flex; flex-direction: column;
+  margin-right: 18px;
+  transition: background-color .4s, border-color .4s;
+}
+.midden { -webkit-box-flex: 1; flex: 1 1 auto; display: flex;
+          flex-direction: column; justify-content: center; }
+.kaart:last-child { margin-right: 0; }
+.kaart.actief { background: var(--nu-dof); border-color: var(--nu); }
+
+.naam { font-size: 27px; font-weight: 600; color: var(--gedempt);
+        letter-spacing: .02em; }
+.kaart.actief .naam { color: var(--nu); }
+.venster { font-size: 76px; font-weight: 700; letter-spacing: -0.035em;
+           line-height: 1; font-variant-numeric: tabular-nums; }
+.doen { font-size: 29px; font-weight: 600; line-height: 1.25; }
+.kaart.actief .doen { color: var(--nu); }
+.wachten { color: var(--straks); }
+.detail { font-size: 19px; color: var(--gedempt); margin-top: 8px; }
+.wanneer { font-size: 25px; font-weight: 600; color: var(--straks);
+           letter-spacing: .04em; margin-bottom: 4px; }
+
+/* Prijsverloop van de dag */
+.grafiek { height: 122px; margin-top: 16px; position: relative; }
+.balken { position: absolute; left: 0; right: 0; bottom: 20px; top: 0;
+          display: -webkit-box; display: flex; -webkit-box-align: end;
+          align-items: flex-end; }
+.balk { -webkit-box-flex: 1; flex: 1 1 0; margin-right: 1px;
+        background: #2f3b4a; border-radius: 2px 2px 0 0; min-height: 2px; }
+.balk.venster { background: #3f7d5a; }
+.balk.nu { background: var(--tekst); }
+.uren { position: absolute; left: 0; right: 0; bottom: 0; height: 18px;
+        color: var(--gedempt); font-size: 15px; }
+.uur { position: absolute; transform: translateX(-50%); }
+
+.voet { display: flex; justify-content: space-between; align-items: baseline;
+        margin-top: 6px; font-size: 18px; color: var(--gedempt); }
+.knipoog { font-style: italic; }
+.oud { color: var(--duur); }
+
+/* 's Nachts zachter, zodat het niet de hele bijkeuken verlicht. */
+body.nacht { filter: brightness(.42); }
+</style>
+</head>
+<body>
+  <div class="kop">
+    <div class="datum" id="datum">&nbsp;</div>
+    <div class="klok"><span id="klok">--:--</span><span class="prijs" id="nuprijs"></span></div>
+  </div>
+
+  <div class="apparaten" id="apparaten"></div>
+
+  <div class="grafiek">
+    <div class="balken" id="balken"></div>
+    <div class="uren" id="uren"></div>
+  </div>
+
+  <div class="voet">
+    <span class="knipoog" id="knipoog"></span>
+    <span id="status"></span>
+  </div>
+
+<script>
+"use strict";
+
+var BRON = "data.json";
+var gegevens = null;
+
+function tweecijfers(n) { return (n < 10 ? "0" : "") + n; }
+function klokvan(d) { return tweecijfers(d.getHours()) + ":" + tweecijfers(d.getMinutes()); }
+
+var DAGEN = ["zondag","maandag","dinsdag","woensdag","donderdag","vrijdag","zaterdag"];
+
+/* Ligt dit tijdstip op een andere dag dan vandaag? Dan hoort er een woord bij,
+   anders lees je 10:00 als "over een half uur" terwijl het morgen is. */
+function dagvoorvoegsel(d, nu) {
+  var verschil = Math.floor((new Date(d.getFullYear(), d.getMonth(), d.getDate()) -
+    new Date(nu.getFullYear(), nu.getMonth(), nu.getDate())) / 86400000);
+  if (verschil === 0) return "";
+  if (verschil === 1) return "morgen ";
+  return DAGEN[d.getDay()] + " ";
+}
+function euro(x) { return "€" + x.toFixed(2).replace(".", ","); }
+
+function duurtekst(minuten) {
+  if (minuten < 60) return minuten + " min";
+  var u = Math.floor(minuten / 60), m = minuten % 60;
+  return m === 0 ? u + " uur" : u + " uur " + m + " min";
+}
+
+/* Wat moet je nu doen met dit apparaat? Dat hangt af van waar we in de dag
+   zitten en hoe ver de uitstelknop reikt. */
+function advies(app, nu) {
+  var start = new Date(app.start), eind = new Date(app.eind);
+  var totStart = Math.round((start - nu) / 60000);
+  var totEind = Math.round((eind - nu) / 60000);
+
+  /* Een kwartier voor de start is uitstel instellen zinloos: dan is nu
+     aanzetten hetzelfde. */
+  if (totStart <= 15 && totEind > 0) {
+    return { klasse: "actief", doen: "NU AANZETTEN",
+             detail: totStart > 0
+               ? "Het gunstige blok begint zo en duurt tot " + klokvan(eind) + "."
+               : "Het gunstige blok loopt nog " + duurtekst(totEind) + "." };
+  }
+  if (totStart > 0) {
+    if (totStart <= app.uitstel_uren * 60) {
+      var uitstel = Math.round(totStart / 30) / 2;
+      var geschreven = uitstel === Math.floor(uitstel)
+            ? uitstel : String(uitstel).replace(".", ",");
+      return { klasse: "", doen: "Nu aanzetten met " + geschreven +
+               (uitstel === 1 ? " uur" : " uur") + " uitstel",
+               detail: "Of om " + klokvan(start) + " gewoon op start drukken." };
+    }
+    return { klasse: "", wacht: true, doen: "Over " + duurtekst(totStart),
+             detail: "Te vroeg om in te stellen; de uitstelknop reikt " +
+                     app.uitstel_uren + " uur vooruit." };
+  }
+  return { klasse: "", doen: "Blok voorbij",
+           detail: "Vanaf hier wordt stroom alleen maar duurder." };
+}
+
+function toonApparaten(nu) {
+  var houder = document.getElementById("apparaten");
+  if (!gegevens.apparaten.length) {
+    houder.innerHTML = '<div class="kaart"><div class="midden">' +
+      '<div class="doen">Nog geen advies</div>' +
+      '<div class="detail" style="margin-top:12px">De prijzen voor morgen ' +
+      'publiceert Tibber rond het middaguur. Tot die tijd valt er weinig te ' +
+      'kiezen.</div></div></div>';
+    return;
+  }
+  var html = "";
+  for (var i = 0; i < gegevens.apparaten.length; i++) {
+    var a = gegevens.apparaten[i];
+    var s = new Date(a.start), e = new Date(a.eind);
+    var t = advies(a, nu);
+    html += '<div class="kaart ' + t.klasse + '">' +
+      '<div class="naam">' + a.emoji + " " + a.naam.toUpperCase() + "</div>" +
+      '<div class="midden">' +
+      (dagvoorvoegsel(s, nu) ? '<div class="wanneer">' +
+        dagvoorvoegsel(s, nu).toUpperCase().replace(" ", "") + "</div>" : "") +
+      '<div class="venster">' + klokvan(s) + "–" + klokvan(e) + "</div></div>" +
+      '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' + t.doen + "</div>" +
+      '<div class="detail">' + t.detail + "</div>" +
+      '<div class="detail">' + euro(a.kosten) + " deze beurt · " +
+      euro(a.besparing) + " goedkoper" +
+      (a.zon_deel >= 0.2 ? " · " + Math.round(a.zon_deel * 100) + "% eigen zon" : "") +
+      "</div></div></div>";
+  }
+  houder.innerHTML = html;
+}
+
+function toonGrafiek(nu) {
+  var p = gegevens.prijzen;
+  if (!p.length) return;
+  var laagste = p[0].p, hoogste = p[0].p;
+  for (var i = 0; i < p.length; i++) {
+    if (p[i].p < laagste) laagste = p[i].p;
+    if (p[i].p > hoogste) hoogste = p[i].p;
+  }
+  var bereik = Math.max(0.02, hoogste - laagste);
+
+  /* Welke kwartieren vallen binnen een aanbevolen blok? */
+  var inBlok = [];
+  for (var k = 0; k < gegevens.apparaten.length; k++) {
+    inBlok.push([new Date(gegevens.apparaten[k].start),
+                 new Date(gegevens.apparaten[k].eind)]);
+  }
+
+  var html = "";
+  for (var j = 0; j < p.length; j++) {
+    var tijd = new Date(p[j].t);
+    var hoogte = 12 + 88 * (p[j].p - laagste) / bereik;
+    var klasse = "balk";
+    for (var m = 0; m < inBlok.length; m++) {
+      if (tijd >= inBlok[m][0] && tijd < inBlok[m][1]) { klasse += " venster"; break; }
+    }
+    if (tijd <= nu && new Date(tijd.getTime() + 15 * 60000) > nu) klasse += " nu";
+    html += '<div class="' + klasse + '" style="height:' + hoogte.toFixed(1) + '%"></div>';
+  }
+  document.getElementById("balken").innerHTML = html;
+
+  /* De reeks begint bij het huidige kwartier, dus de labels moeten uit de
+     gegevens komen in plaats van uit een vaste reeks van nul tot 24. */
+  var uren = "";
+  for (var q = 0; q < p.length; q++) {
+    var m = new Date(p[q].t);
+    if (m.getHours() % 6 === 0 && m.getMinutes() === 0) {
+      uren += '<span class="uur" style="left:' +
+              ((q + 0.5) / p.length * 100).toFixed(2) + '%">' +
+              tweecijfers(m.getHours()) + ":00</span>";
+    }
+  }
+  document.getElementById("uren").innerHTML = uren;
+}
+
+function huidigePrijs(nu) {
+  var p = gegevens.prijzen;
+  for (var i = 0; i < p.length; i++) {
+    var t = new Date(p[i].t);
+    if (t <= nu && new Date(t.getTime() + 15 * 60000) > nu) return p[i].p;
+  }
+  return null;
+}
+
+function tekenen() {
+  var nu = new Date();
+  document.getElementById("klok").textContent = klokvan(nu);
+  document.body.className = (nu.getHours() >= 22 || nu.getHours() < 7) ? "nacht" : "";
+  if (!gegevens) return;
+
+  var maanden = ["januari","februari","maart","april","mei","juni","juli",
+                 "augustus","september","oktober","november","december"];
+  var d = new Date(gegevens.dag + "T12:00:00");
+  document.getElementById("datum").textContent =
+    gegevens.dagnaam + " " + d.getDate() + " " + maanden[d.getMonth()];
+
+  var prijs = huidigePrijs(nu);
+  document.getElementById("nuprijs").textContent =
+    prijs === null ? "" : euro(prijs) + " per kWh";
+  document.getElementById("knipoog").textContent = gegevens.knipoog || gegevens.duiding;
+
+  toonApparaten(nu);
+  toonGrafiek(nu);
+
+  /* Data van gisteren is misleidend, dus dat zeggen we erbij. */
+  var status = document.getElementById("status");
+  var vandaag = nu.getFullYear() + "-" + tweecijfers(nu.getMonth() + 1) + "-" +
+                tweecijfers(nu.getDate());
+  if (gegevens.dag !== vandaag) {
+    status.className = "oud";
+    status.textContent = "Let op: dit is het plan van " + gegevens.dag;
+  } else {
+    status.className = "";
+    status.textContent = "bijgewerkt " + klokvan(new Date(gegevens.gemaakt));
+  }
+}
+
+function ophalen() {
+  var verzoek = new XMLHttpRequest();
+  verzoek.open("GET", BRON + "?t=" + Date.now(), true);
+  verzoek.onload = function () {
+    if (verzoek.status >= 200 && verzoek.status < 300) {
+      try {
+        gegevens = JSON.parse(verzoek.responseText);
+        try { localStorage.setItem("stroomtip", verzoek.responseText); } catch (e) {}
+      } catch (e) {}
+    }
+    tekenen();
+  };
+  /* Bij netwerkproblemen blijft het laatst bekende plan staan: een oud advies
+     is nuttiger dan een leeg scherm aan de muur. */
+  verzoek.onerror = function () { tekenen(); };
+  verzoek.send();
+}
+
+try {
+  var bewaard = localStorage.getItem("stroomtip");
+  if (bewaard) gegevens = JSON.parse(bewaard);
+} catch (e) {}
+
+tekenen();
+ophalen();
+setInterval(tekenen, 10000);       // klok en toestand bijhouden
+setInterval(ophalen, 300000);      // elke vijf minuten verse gegevens
+</script>
+</body>
+</html>
