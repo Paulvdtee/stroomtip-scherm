@@ -215,7 +215,8 @@ body.nacht { filter: brightness(.42); }
         wordt elk half uur herberekend.
         <br><span id="versie" style="opacity:.5"></span>
         <span id="wis" style="float:right;cursor:pointer;text-decoration:underline">
-        token wissen</span>
+        token wissen</span><span id="ververs" style="float:right;cursor:pointer;
+        margin-right:22px;text-decoration:underline">nu bijwerken</span>
       </div>
     </div>
   </div>
@@ -454,9 +455,10 @@ function token() {
    meteen uit de adresbalk gehaald, zodat het niet in beeld blijft staan. */
 (function () {
   var m = window.location.search.match(/[?&]token=([^&]+)/);
-  if (!m) return;
-  try { localStorage.setItem("tibber_token", decodeURIComponent(m[1])); } catch (e) {}
-  if (window.history && window.history.replaceState) {
+  if (m) {
+    try { localStorage.setItem("tibber_token", decodeURIComponent(m[1])); } catch (e) {}
+  }
+  if (window.location.search && window.history && window.history.replaceState) {
     window.history.replaceState({}, "", window.location.pathname);
   }
 })();
@@ -626,7 +628,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-09c";        // staat in het uitlegvenster
+var VERSIE = "2026-09-09d";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -923,6 +925,9 @@ function toonUitleg(aan) { sluier.style.display = aan ? "block" : "none"; }
 document.getElementById("versie").textContent =
   "versie " + VERSIE + " \u00b7 " +
   (token() ? "token aanwezig, rekent zelf" : "geen token, gebruikt bestand");
+document.getElementById("ververs").onclick = function () {
+  window.location.replace(window.location.pathname + "?v=" + Date.now());
+};
 document.getElementById("wis").onclick = function () {
   try { localStorage.removeItem("tibber_token"); } catch (e) {}
   window.location.reload();
@@ -940,15 +945,19 @@ function vernieuwen() {
    Zonder deze controle blijft het draaien op de versie van de dag dat het is
    opgehangen, en komt een verbetering er nooit meer in. We vragen daarom af en
    toe of het bestand op de server nog hetzelfde is, en herladen zo ja niet. */
-var eigenVersie = null;
-
+/* Vergelijk het versienummer in dit bestand met dat op de server. Een eerdere
+   opzet vergeleek het serverbestand met zichzelf, en kon daardoor nooit merken
+   dat de draaiende pagina zelf uit een oude cache kwam. */
 function versieCheck() {
-  fetch(window.location.pathname + "?v=" + Date.now(), { method: "HEAD" })
-    .then(function (a) {
-      var kenmerk = a.headers.get("etag") || a.headers.get("last-modified");
-      if (!kenmerk) return;
-      if (eigenVersie === null) { eigenVersie = kenmerk; return; }
-      if (kenmerk !== eigenVersie) { window.location.reload(); }
+  fetch(window.location.pathname + "?v=" + Date.now(), { cache: "no-store" })
+    .then(function (a) { return a.text(); })
+    .then(function (t) {
+      var m = t.match(/var VERSIE = "([^"]+)"/);
+      if (m && m[1] !== VERSIE) {
+        /* Opnieuw laden met een unieke adresregel, anders dient de browser
+           gewoon weer zijn eigen kopie op. */
+        window.location.replace(window.location.pathname + "?v=" + Date.now());
+      }
     })
     .catch(function () {});
 }
