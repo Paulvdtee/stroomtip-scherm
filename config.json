@@ -31,9 +31,9 @@
   {
    "naam": "Vaatwasser",
    "emoji": "🍽️",
-   "draaiduur_minuten": 180,
-   "verbruik_kwh": 1.0,
-   "piek_watt": 1800,
+   "draaiduur_minuten": 225,
+   "verbruik_kwh": 1.039,
+   "piek_watt": 1950,
    "uitstel_max_uren": 3,
    "mag_s_nachts": true,
    "vroegst_uur": 0,
