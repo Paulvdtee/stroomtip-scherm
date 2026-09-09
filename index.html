@@ -312,8 +312,8 @@ function tekenen() {
    Het token staat alleen in de browser van deze iPad, nooit in de openbare
    repo. Wie de pagina elders opent ziet dit blok simpelweg niet. */
 
-var HUIS = "ca114d38-3f5f-4a5b-aab4-b1c6fdcb9b6e";
 var WS_ADRES = "wss://websocket-api.tibber.com/v1-beta/gql/subscriptions";
+var huis = null;
 var meting = null;
 var socket = null;
 var herverbindNa = 3000;
@@ -375,8 +375,28 @@ function toonLive(nu) {
   houder.innerHTML = html;
 }
 
+/* Het huis-id hoort niet in een openbare pagina thuis, dus dat vragen we op
+   met het token dat alleen op dit apparaat staat. */
+function zoekHuis(klaar) {
+  if (huis) { klaar(); return; }
+  var v = new XMLHttpRequest();
+  v.open("POST", "https://api.tibber.com/v1-beta/gql", true);
+  v.setRequestHeader("Content-Type", "application/json");
+  v.setRequestHeader("Authorization", "Bearer " + token());
+  v.onload = function () {
+    try {
+      var d = JSON.parse(v.responseText);
+      huis = d.data.viewer.homes[0].id;
+      klaar();
+    } catch (e) { setTimeout(function () { zoekHuis(klaar); }, 30000); }
+  };
+  v.onerror = function () { setTimeout(function () { zoekHuis(klaar); }, 30000); };
+  v.send(JSON.stringify({ query: "{ viewer { homes { id } } }" }));
+}
+
 function verbind() {
   if (!token() || !window.WebSocket) return;
+  if (!huis) { zoekHuis(verbind); return; }
   try { socket = new WebSocket(WS_ADRES, "graphql-transport-ws"); }
   catch (e) { return; }
 
@@ -389,7 +409,7 @@ function verbind() {
     if (m.type === "connection_ack") {
       herverbindNa = 3000;
       socket.send(JSON.stringify({ id: "1", type: "subscribe", payload: { query:
-        'subscription{ liveMeasurement(homeId:"' + HUIS +
+        'subscription{ liveMeasurement(homeId:"' + huis +
         '"){ power powerProduction } }' } }));
     } else if (m.type === "next" && m.payload && m.payload.data) {
       meting = m.payload.data.liveMeasurement;
