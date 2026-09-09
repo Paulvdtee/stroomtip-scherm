@@ -53,6 +53,12 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .midden { -webkit-box-flex: 1; flex: 1 1 auto; display: flex;
           flex-direction: column; justify-content: center; }
 .kaart:last-child { margin-right: 0; }
+.apparaten.drie .kaart { padding: 18px 20px 20px; margin-right: 14px; }
+.apparaten.drie .naam { font-size: 21px; }
+.apparaten.drie .venster { font-size: 46px; letter-spacing: -0.04em; }
+.apparaten.drie .doen { font-size: 23px; }
+.apparaten.drie .detail { font-size: 16px; margin-top: 6px; }
+.apparaten.drie .wanneer { font-size: 19px; }
 .kaart.actief { background: var(--nu-dof); border-color: var(--nu); }
 
 .naam { font-size: 27px; font-weight: 600; color: var(--gedempt);
@@ -283,6 +289,8 @@ function advies(app, nu) {
 
 function toonApparaten(nu) {
   var houder = document.getElementById("apparaten");
+  houder.className = "apparaten" +
+    (gegevens.apparaten.length > 2 ? " drie" : "");
   if (!gegevens.apparaten.length) {
     houder.innerHTML = '<div class="kaart"><div class="midden">' +
       '<div class="doen">Nog geen advies</div>' +
