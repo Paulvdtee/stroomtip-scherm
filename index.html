@@ -389,16 +389,27 @@ function tekenen() {
   toonLive(nu);
 
   /* Data van gisteren is misleidend, dus dat zeggen we erbij. */
+  /* Drie dingen kunnen misgaan, en die moeten uit elkaar te houden zijn:
+     het plan is van een andere dag, de pagina kan de gegevens niet meer
+     ophalen, of alles is in orde. Het tijdstip hieronder is wanneer dit advies
+     is opgesteld — het blijft staan zolang het advies niet verandert, en dat
+     is normaal. */
   var status = document.getElementById("status");
   var vandaag = nu.getFullYear() + "-" + tweecijfers(nu.getMonth() + 1) + "-" +
                 tweecijfers(nu.getDate());
+  var stilTe = opgehaaldOm ? (Date.now() - opgehaaldOm) / 60000 : 999;
+
   if (gegevens.dag !== vandaag) {
     status.className = "oud";
-    status.textContent = "Let op: dit is het plan van " + gegevens.dag;
+    status.textContent = "Let op: dit plan is van " + gegevens.dag;
+  } else if (stilTe > 20) {
+    status.className = "oud";
+    status.textContent = "geen verbinding met de gegevens" +
+      (opgehaaldOm ? " sinds " + klokvan(new Date(opgehaaldOm)) : "");
   } else {
     status.className = "";
-    status.textContent = "advies berekend om " +
-      klokvan(new Date(gegevens.gemaakt));
+    status.textContent = "advies opgesteld om " +
+      klokvan(new Date(gegevens.gemaakt)) + ", blijft gelden tot het verandert";
   }
 }
 
@@ -410,6 +421,7 @@ var WS_ADRES = "wss://websocket-api.tibber.com/v1-beta/gql/subscriptions";
 var huis = null;
 var meting = null;
 var metingOm = 0;          // wanneer de laatste meting binnenkwam
+var opgehaaldOm = 0;       // wanneer we de gegevens voor het laatst binnenhaalden
 var socket = null;
 var herverbindNa = 3000;
 
@@ -542,6 +554,7 @@ function ophalen() {
     if (verzoek.status >= 200 && verzoek.status < 300) {
       try {
         gegevens = JSON.parse(verzoek.responseText);
+        opgehaaldOm = Date.now();
         try { localStorage.setItem("stroomtip", verzoek.responseText); } catch (e) {}
       } catch (e) {}
     }
