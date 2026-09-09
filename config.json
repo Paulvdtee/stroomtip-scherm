@@ -1,0 +1,65 @@
+{
+ "locatie": {
+  "breedtegraad": 51.97917,
+  "lengtegraad": 5.79722
+ },
+ "zonnepanelen": {
+  "aantal_panelen": 10,
+  "wattpiek_per_paneel": 380,
+  "helling_graden": 13,
+  "richting_graden": 180,
+  "omvormer_max_watt": 295,
+  "systeemrendement": 0.5
+ },
+ "huis": {
+  "basislast_watt": 350
+ },
+ "saldering": {
+  "eindigt_op": "2027-01-01",
+  "gewicht_tijdens_saldering": 0.15,
+  "gewicht_erna": 1.0,
+  "terugleverdeel": 0.45
+ },
+ "bericht": {
+  "ochtend_uur": 7,
+  "ochtend_minuut": 30,
+  "avond_uur": 19,
+  "avond_minuut": 0,
+  "afronden_op_minuten": 30
+ },
+ "apparaat": [
+  {
+   "naam": "Vaatwasser",
+   "emoji": "🍽️",
+   "draaiduur_minuten": 180,
+   "verbruik_kwh": 1.0,
+   "piek_watt": 1800,
+   "uitstel_max_uren": 3,
+   "mag_s_nachts": true,
+   "vroegst_uur": 0,
+   "laatst_uur": 24
+  },
+  {
+   "naam": "Wassen",
+   "emoji": "👕",
+   "draaiduur_minuten": 150,
+   "verbruik_kwh": 0.8,
+   "piek_watt": 2000,
+   "uitstel_max_uren": 19,
+   "mag_s_nachts": true,
+   "vroegst_uur": 0,
+   "laatst_uur": 24
+  },
+  {
+   "naam": "Wassen + drogen",
+   "emoji": "🧺",
+   "draaiduur_minuten": 240,
+   "verbruik_kwh": 4.5,
+   "piek_watt": 2000,
+   "uitstel_max_uren": 19,
+   "mag_s_nachts": false,
+   "vroegst_uur": 7,
+   "laatst_uur": 22
+  }
+ ]
+}

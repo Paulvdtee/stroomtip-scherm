@@ -450,7 +450,7 @@ function toonLive(nu) {
       if (!waarde) return;
       try { localStorage.setItem("tibber_token", waarde); } catch (e) {}
       verbind();
-      tekenen();
+      bereken();
     };
     return;
   }
@@ -580,6 +580,290 @@ try {
   if (bewaard) gegevens = JSON.parse(bewaard);
 } catch (e) {}
 
+
+/* ---- Zelf rekenen -----------------------------------------------------
+   De pagina haalt de prijzen en de zonverwachting zelf op en zoekt zelf het
+   goedkoopste tijdvak. Dat scheelt een geplande taak die elders moet afgaan,
+   en het advies is daardoor altijd van dit moment in plaats van van het
+   laatste half uur. Dezelfde som als aan de Python-kant. */
+
+var config = null;
+var TIBBER = "https://api.tibber.com/v1-beta/gql";
+
+function haalConfig() {
+  return fetch("config.json?t=" + Date.now()).then(function (a) {
+    return a.json();
+  }).then(function (c) { config = c; return c; });
+}
+
+function tibberVraag(query) {
+  return fetch(TIBBER, {
+    method: "POST",
+    headers: { "Content-Type": "application/json",
+               "Authorization": "Bearer " + token() },
+    body: JSON.stringify({ query: query })
+  }).then(function (a) { return a.json(); });
+}
+
+/* Sinds oktober 2025 rekent de markt met kwartieren. Lukt dat niet, dan vallen
+   we terug op uurprijzen en knippen die zelf in vieren. */
+function haalPrijzen() {
+  var velden = "{ total energy startsAt }";
+  var kwartier = "{ viewer { homes { currentSubscription { priceInfo" +
+    "(resolution: QUARTER_HOURLY) { today " + velden + " tomorrow " + velden +
+    " } } } } }";
+  var uur = "{ viewer { homes { currentSubscription { priceInfo { today " +
+    velden + " tomorrow " + velden + " } } } } }";
+
+  return tibberVraag(kwartier).then(function (d) {
+    if (d.errors) return tibberVraag(uur).then(function (u) { return [u, 60]; });
+    return [d, 15];
+  }).then(function (paar) {
+    var d = paar[0], minuten = paar[1];
+    if (d.errors) throw new Error(d.errors[0].message);
+    var info = d.data.viewer.homes[0].currentSubscription.priceInfo;
+    var slots = [];
+    ["today", "tomorrow"].forEach(function (deel) {
+      (info[deel] || []).forEach(function (punt) {
+        var start = new Date(punt.startsAt);
+        var kaal = punt.energy === null || punt.energy === undefined
+          ? punt.total * 0.45 : punt.energy;
+        var stappen = minuten === 60 ? 4 : 1;
+        for (var k = 0; k < stappen; k++) {
+          slots.push({ t: new Date(start.getTime() + k * 900000),
+                       p: punt.total, kaal: kaal, z: 0 });
+        }
+      });
+    });
+    slots.sort(function (a, b) { return a.t - b.t; });
+    return slots;
+  });
+}
+
+/* Instraling op het paneelvlak zelf, dus met de helling en windrichting van
+   het dak erin. Onze kompasnotatie (180 is zuid) verschilt van die van
+   Open-Meteo, dat vanaf zuid rekent. */
+function haalZon() {
+  var p = config.zonnepanelen, l = config.locatie;
+  var url = "https://api.open-meteo.com/v1/forecast?latitude=" + l.breedtegraad +
+    "&longitude=" + l.lengtegraad +
+    "&minutely_15=global_tilted_irradiance,temperature_2m&tilt=" +
+    p.helling_graden + "&azimuth=" + (p.richting_graden - 180) +
+    "&timezone=Europe%2FAmsterdam&forecast_days=2";
+  return fetch(url).then(function (a) { return a.json(); }).then(function (d) {
+    var piek = p.aantal_panelen * p.wattpiek_per_paneel;
+    var plafond = p.aantal_panelen * (p.omvormer_max_watt || 1e9);
+    var uit = {};
+    var r = d.minutely_15;
+    for (var i = 0; i < r.time.length; i++) {
+      var g = r.global_tilted_irradiance[i] || 0;
+      var watt = 0;
+      if (g > 0) {
+        var temp = r.temperature_2m[i];
+        var cel = (temp === null ? 15 : temp) + 0.03125 * g;
+        var hitte = Math.max(0.7, 1 - 0.004 * Math.max(0, cel - 25));
+        watt = Math.min(g / 1000 * piek * p.systeemrendement * hitte, plafond);
+      }
+      uit[new Date(r.time[i]).getTime()] = Math.round(watt);
+    }
+    return uit;
+  }).catch(function () { return {}; });   // zonder zon blijft de prijs leidend
+}
+
+function pvGewicht(datum) {
+  var s = config.saldering;
+  return datum >= new Date(s.eindigt_op) ? s.gewicht_erna
+                                         : s.gewicht_tijdens_saldering;
+}
+
+/* Wat een kilowattuur op dit moment feitelijk kost voor dit apparaat. Stroom
+   die je zelf opwekt en meteen opmaakt hoef je niet in te kopen; wat dat waard
+   is, is het belastingdeel bovenop de kale prijs. */
+function effectievePrijs(slot, piek, basislast, gewicht) {
+  if (piek <= 0) return slot.p;
+  var beschikbaar = Math.max(0, slot.z - basislast);
+  var dekking = Math.min(1, beschikbaar / piek);
+  var voordeel = Math.max(0, slot.p - slot.kaal);
+  return slot.p - dekking * gewicht * voordeel;
+}
+
+function magDraaien(app, start, eind) {
+  if (app.mag_s_nachts && app.vroegst_uur === 0 && app.laatst_uur >= 24) return true;
+  var m = new Date(start.getTime());
+  while (m < eind) {
+    if (m.getHours() < app.vroegst_uur || m.getHours() >= app.laatst_uur) return false;
+    m = new Date(m.getTime() + 900000);
+  }
+  return true;
+}
+
+/* Buiten deze uren geen advies dat je 's nachts uit bed haalt. */
+var WEKUREN = [7, 22];
+
+function planApparaat(app, slots, nu, horizon) {
+  var aantal = Math.round(app.draaiduur_minuten / 15);
+  var basislast = config.huis.basislast_watt;
+  var energiePerSlot = app.verbruik_kwh / aantal;
+  var afronding = config.bericht.afronden_op_minuten;
+  var uitstelMs = app.uitstel_max_uren * 3600000;
+
+  var kandidaten = [], alle = [];
+  for (var i = 0; i + aantal <= slots.length; i++) {
+    var start = slots[i].t;
+    var eind = new Date(start.getTime() + app.draaiduur_minuten * 60000);
+    if (start < nu || eind > horizon) continue;
+    if (start.getMinutes() % afronding !== 0) continue;
+    if (!magDraaien(app, start, eind)) continue;
+
+    var gewicht = pvGewicht(start);
+    var kosten = 0;
+    for (var j = i; j < i + aantal; j++) {
+      kosten += effectievePrijs(slots[j], app.piek_watt, basislast, gewicht) *
+                energiePerSlot;
+    }
+    alle.push([kosten, start]);
+
+    /* Kun je er zelf bij? Binnen het bereik van de uitstelknop wel. Anders
+       alleen als we op dat moment een seintje zouden mogen geven. */
+    var binnenBereik = start.getTime() <= nu.getTime() + uitstelMs;
+    var wekker = null;
+    if (!binnenBereik) {
+      if (start.getHours() < WEKUREN[0] || start.getHours() >= WEKUREN[1]) continue;
+      wekker = start;
+    }
+    kandidaten.push([kosten, i, wekker]);
+  }
+  if (!kandidaten.length) return null;
+
+  var beste = kandidaten[0];
+  for (var k = 1; k < kandidaten.length; k++) {
+    if (kandidaten[k][0] < beste[0]) beste = kandidaten[k];
+  }
+  var duurste = alle[0];
+  for (var m = 1; m < alle.length; m++) {
+    if (alle[m][0] > duurste[0]) duurste = alle[m];
+  }
+
+  var index = beste[1];
+  var zon = 0;
+  for (var n = index; n < index + aantal; n++) {
+    zon += Math.min(app.piek_watt, Math.max(0, slots[n].z - basislast));
+  }
+  return {
+    naam: app.naam, emoji: app.emoji,
+    start: slots[index].t.toISOString(),
+    eind: new Date(slots[index].t.getTime() +
+                   app.draaiduur_minuten * 60000).toISOString(),
+    kosten: Math.round(beste[0] * 100) / 100,
+    duurste_kosten: Math.round(duurste[0] * 100) / 100,
+    duurste_start: duurste[1].toISOString(),
+    zon_deel: zon / (app.piek_watt * aantal),
+    duur_minuten: app.draaiduur_minuten,
+    uitstel_uren: app.uitstel_max_uren
+  };
+}
+
+var DAGNAMEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag",
+                "vrijdag", "zaterdag"];
+
+var KNIPOGEN = {
+  goedkoop: ["Bijna gratis. Draai gerust een extra lading. \ud83e\udde6",
+             "Zulke dagen zijn er om van te profiteren. \ud83e\uddfa",
+             "Stroom kost vandaag bijna niks. Doe maar wat."],
+  normaal: ["Scheelt weer een bakje koffie. \u2615",
+            "Kleine moeite. \ud83e\udde6",
+            "Elke keer weer een paar dubbeltjes.",
+            "Sokken zijn er blij mee. \ud83e\udde6"],
+  duur: ["Dure dag. Die trui kan vast nog een rondje. \ud83e\udde6",
+         "Vandaag valt er weinig te halen. Wachten mag ook.",
+         "Niet je beste dag, maar dit is het minst erge moment."],
+  negatief: ["De stroom betaalt j\u00f3u vandaag. Zet alles maar aan. \u26a1",
+             "Negatieve prijzen. Dit is het moment voor die grote was. \u26a1"]
+};
+
+/* Welke toon past bij vandaag? Alleen mopperen over een dure dag als er ook
+   echt weinig te winnen valt, anders spreekt het de rest van het scherm tegen. */
+function knipoog(slots, apparaten, nu) {
+  var vandaag = [], laagste = null;
+  for (var i = 0; i < slots.length; i++) {
+    if (slots[i].t.getDate() === nu.getDate()) vandaag.push(slots[i].p);
+    if (laagste === null || slots[i].p < laagste) laagste = slots[i].p;
+  }
+  var som = 0;
+  for (var j = 0; j < vandaag.length; j++) som += vandaag[j];
+  var gemiddeld = vandaag.length ? som / vandaag.length : 0.22;
+
+  var besparing = 0;
+  for (var k = 0; k < apparaten.length; k++) {
+    besparing += apparaten[k].duurste_kosten - apparaten[k].kosten;
+  }
+
+  var soort;
+  if (laagste !== null && laagste < 0) soort = "negatief";
+  else if (gemiddeld < 0.16) soort = "goedkoop";
+  else if (gemiddeld > 0.30 && besparing < 0.60) soort = "duur";
+  else soort = "normaal";
+
+  /* Vast per dag, zodat de regel niet bij elke verversing verspringt. */
+  var lijst = KNIPOGEN[soort];
+  var dagnummer = Math.floor(nu.getTime() / 86400000) + soort.length;
+  return lijst[dagnummer % lijst.length];
+}
+
+function bereken() {
+  if (!token()) { tekenen(); return Promise.resolve(); }
+  return (config ? Promise.resolve(config) : haalConfig())
+    .then(function () { return Promise.all([haalPrijzen(), haalZon()]); })
+    .then(function (r) {
+      var slots = r[0], zon = r[1];
+      for (var i = 0; i < slots.length; i++) {
+        var w = zon[slots[i].t.getTime()];
+        slots[i].z = w === undefined ? 0 : w;
+      }
+      var nu = new Date();
+      var horizon = slots.length
+        ? new Date(slots[slots.length - 1].t.getTime() + 900000) : nu;
+
+      var apparaten = [];
+      for (var a = 0; a < config.apparaat.length; a++) {
+        var v = planApparaat(config.apparaat[a], slots, nu, horizon);
+        if (v) apparaten.push(v);
+      }
+
+      /* Alleen de komende 24 uur meegeven voor de grafiek onderin. */
+      var vanaf = new Date(nu);
+      vanaf.setMinutes(Math.floor(nu.getMinutes() / 15) * 15, 0, 0);
+      var reeks = [];
+      for (var s = 0; s < slots.length && reeks.length < 96; s++) {
+        if (slots[s].t >= vanaf) {
+          reeks.push({ t: slots[s].t.toISOString(), p: slots[s].p,
+                       z: slots[s].z });
+        }
+      }
+
+      gegevens = {
+        gemaakt: nu.toISOString(),
+        dag: nu.getFullYear() + "-" + tweecijfers(nu.getMonth() + 1) + "-" +
+             tweecijfers(nu.getDate()),
+        dagnaam: DAGNAMEN[nu.getDay()],
+        apparaten: apparaten,
+        knipoog: apparaten.length ? knipoog(slots, apparaten, nu) : "",
+        prijzen: reeks
+      };
+      opgehaaldOm = Date.now();
+      try {
+        localStorage.setItem("stroomtip", JSON.stringify(gegevens));
+      } catch (e) {}
+      tekenen();
+    })
+    .catch(function (fout) {
+      /* Mislukt het, dan blijft het laatst bekende advies staan; de statusregel
+         onderin meldt vanzelf dat de gegevens verouderen. */
+      if (window.console) console.log("berekenen mislukt:", fout);
+      tekenen();
+    });
+}
+
 var sluier = document.getElementById("sluier");
 function toonUitleg(aan) { sluier.style.display = aan ? "block" : "none"; }
 document.getElementById("uitlegknop").onclick = function () { toonUitleg(true); };
@@ -587,11 +871,15 @@ document.getElementById("sluit").onclick = function () { toonUitleg(false); };
 /* Buiten het kader tikken sluit ook; dat verwacht iedereen. */
 sluier.onclick = function (e) { if (e.target === sluier) toonUitleg(false); };
 
+function vernieuwen() {
+  if (token()) { bereken(); } else { ophalen(); }
+}
+
 tekenen();
-ophalen();
+vernieuwen();
 verbind();
 setInterval(tekenen, 10000);       // klok en toestand bijhouden
-setInterval(ophalen, 300000);      // elke vijf minuten verse gegevens
+setInterval(vernieuwen, 300000);   // elke vijf minuten opnieuw doorrekenen
 </script>
 </body>
 </html>
