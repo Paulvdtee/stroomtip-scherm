@@ -214,6 +214,8 @@ body.nacht { filter: brightness(.42); }
         als getal: dat is niet te meten, dus heb je er niets aan. Het advies
         wordt elk half uur herberekend.
         <br><span id="versie" style="opacity:.5"></span>
+        <span id="wis" style="float:right;cursor:pointer;text-decoration:underline">
+        token wissen</span>
       </div>
     </div>
   </div>
@@ -441,6 +443,7 @@ var metingOm = 0;          // wanneer de laatste meting binnenkwam
 var opgehaaldOm = 0;       // wanneer we de gegevens voor het laatst binnenhaalden
 var socket = null;
 var herverbindNa = 3000;
+var tokenOngeldig = false;
 
 function token() {
   try { return localStorage.getItem("tibber_token") || ""; } catch (e) { return ""; }
@@ -460,15 +463,24 @@ function token() {
 
 function toonLive(nu) {
   var houder = document.getElementById("live");
-  if (!token()) {
-    houder.innerHTML = '<div class="meting" style="flex:1"><input class="tokenveld" ' +
-      'id="tokenveld" placeholder="Tibber-token plakken om het live verbruik te tonen">' +
-      "</div>";
+  if (!token() || tokenOngeldig) {
+    houder.innerHTML = (tokenOngeldig
+        ? '<div class="meting" style="flex:0 0 300px"><div class="bij oud">' +
+          "Dit token wordt niet geaccepteerd.</div><div class=\"stand\">" +
+          "Plak het juiste ernaast, of haal een nieuw op bij " +
+          "developer.tibber.com</div></div>"
+        : "") +
+      '<div class="meting" style="flex:1"><input class="tokenveld" ' +
+      'id="tokenveld" placeholder="Tibber-token plakken om het live verbruik ' +
+      'te tonen"></div>';
     var veld = document.getElementById("tokenveld");
     veld.onchange = function () {
       var waarde = veld.value.replace(/\s/g, "");
       if (!waarde) return;
       try { localStorage.setItem("tibber_token", waarde); } catch (e) {}
+      tokenOngeldig = false;
+      laatsteFout = null;
+      herverbindNa = 3000;
       verbind();
       bereken();
     };
@@ -568,8 +580,15 @@ function verbind() {
   };
   /* Het scherm hangt er dagen achtereen, dus een verbroken verbinding moet
      zichzelf herstellen. Bij aanhoudende problemen steeds rustiger proberen. */
-  socket.onclose = function () {
+  socket.onclose = function (e) {
     socket = null;
+    /* 4403 is Tibbers manier om te zeggen dat het token niet deugt. Opnieuw
+       proberen heeft dan geen zin; dat blijft eindeloos hangen op "verbinden". */
+    if (e && (e.code === 4403 || (e.reason || "").indexOf("nvalid token") >= 0)) {
+      tokenOngeldig = true;
+      tekenen();
+      return;
+    }
     setTimeout(verbind, herverbindNa);
     herverbindNa = Math.min(herverbindNa * 2, 120000);
   };
@@ -638,6 +657,11 @@ function haalPrijzen() {
     velden + " tomorrow " + velden + " } } } } }";
 
   return tibberVraag(kwartier).then(function (d) {
+    if (d.errors && d.errors[0] &&
+        (d.errors[0].message || "").indexOf("nvalid token") >= 0) {
+      tokenOngeldig = true;
+      throw new Error("het token wordt niet geaccepteerd");
+    }
     if (d.errors) return tibberVraag(uur).then(function (u) { return [u, 60]; });
     return [d, 15];
   }).then(function (paar) {
@@ -893,6 +917,10 @@ function toonUitleg(aan) { sluier.style.display = aan ? "block" : "none"; }
 document.getElementById("versie").textContent =
   "versie " + VERSIE + " \u00b7 " +
   (token() ? "token aanwezig, rekent zelf" : "geen token, gebruikt bestand");
+document.getElementById("wis").onclick = function () {
+  try { localStorage.removeItem("tibber_token"); } catch (e) {}
+  window.location.reload();
+};
 document.getElementById("uitlegknop").onclick = function () { toonUitleg(true); };
 document.getElementById("sluit").onclick = function () { toonUitleg(false); };
 /* Buiten het kader tikken sluit ook; dat verwacht iedereen. */
