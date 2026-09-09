@@ -35,6 +35,7 @@
    "verbruik_kwh": 1.039,
    "piek_watt": 1950,
    "uitstel_max_uren": 3,
+   "uitstel_type": "start",
    "mag_s_nachts": true,
    "vroegst_uur": 0,
    "laatst_uur": 24
@@ -46,6 +47,7 @@
    "verbruik_kwh": 0.8,
    "piek_watt": 2000,
    "uitstel_max_uren": 19,
+   "uitstel_type": "eind",
    "mag_s_nachts": true,
    "vroegst_uur": 0,
    "laatst_uur": 24
@@ -57,6 +59,7 @@
    "verbruik_kwh": 4.5,
    "piek_watt": 2000,
    "uitstel_max_uren": 19,
+   "uitstel_type": "eind",
    "mag_s_nachts": false,
    "vroegst_uur": 7,
    "laatst_uur": 22

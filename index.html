@@ -271,8 +271,15 @@ function advies(app, nu) {
                : "Het gunstige blok loopt nog " + duurtekst(totEind) + "." };
   }
   if (totStart > 0) {
-    if (totStart <= app.uitstel_uren * 60) {
-      var afgerond = Math.round(totStart / 30) * 30;
+    /* Twee soorten uitstelknoppen. Bij "eind" stel je in wanneer hij klaar
+       moet zijn en rekent de machine zelf terug; dan moet de hele beurt binnen
+       het bereik passen, en luidt de instructie heel anders. */
+    var eindStand = app.uitstel_type === "eind";
+    var bereik = app.uitstel_uren * 60;
+    var nodig = eindStand ? totEind : totStart;
+
+    if (nodig <= bereik) {
+      var afgerond = Math.round(nodig / 30) * 30;
       var geschreven;
       if (afgerond < 60) {
         geschreven = afgerond + " min";
@@ -281,12 +288,19 @@ function advies(app, nu) {
         geschreven = (uur === Math.floor(uur) ? uur : String(uur).replace(".", ","))
                      + " uur";
       }
-      return { klasse: "", doen: "Nu aanzetten met " + geschreven + " uitstel",
-               detail: "Of om " + klokvan(start) + " gewoon op start drukken." };
+      return eindStand
+        ? { klasse: "", doen: "Nu aanzetten, klaar over " + geschreven,
+            detail: "Deze machine vraagt wann\u00e9\u00e9r hij klaar moet zijn; hij "
+                    + "begint dan vanzelf om " + klokvan(start) + "." }
+        : { klasse: "", doen: "Nu aanzetten met " + geschreven + " uitstel",
+            detail: "Of om " + klokvan(start) + " gewoon op start drukken." };
     }
     return { klasse: "", wacht: true, doen: "Over " + duurtekst(totStart),
-             detail: "Te vroeg om in te stellen; de uitstelknop reikt " +
-                     app.uitstel_uren + " uur vooruit." };
+             detail: eindStand
+               ? "Te vroeg: hij kan hooguit " + app.uitstel_uren
+                 + " uur vooruit klaar zijn."
+               : "Te vroeg om in te stellen; de uitstelknop reikt "
+                 + app.uitstel_uren + " uur vooruit." };
   }
   return { klasse: "", doen: "Blok voorbij",
            detail: "Vanaf hier wordt stroom alleen maar duurder." };
@@ -628,7 +642,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-09d";        // staat in het uitlegvenster
+var VERSIE = "2026-09-09e";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -777,7 +791,11 @@ function planApparaat(app, slots, nu, horizon) {
 
     /* Kun je er zelf bij? Binnen het bereik van de uitstelknop wel. Anders
        alleen als we op dat moment een seintje zouden mogen geven. */
-    var binnenBereik = start.getTime() <= nu.getTime() + uitstelMs;
+    /* Bij een knop die de eindtijd instelt moet de hele beurt binnen het
+       bereik passen, dus de draaiduur gaat eraf. */
+    var binnenBereik = app.uitstel_type === "eind"
+      ? eind.getTime() <= nu.getTime() + uitstelMs
+      : start.getTime() <= nu.getTime() + uitstelMs;
     var wekker = null;
     if (!binnenBereik) {
       if (start.getHours() < WEKUREN[0] || start.getHours() >= WEKUREN[1]) continue;
@@ -811,7 +829,8 @@ function planApparaat(app, slots, nu, horizon) {
     duurste_start: duurste[1].toISOString(),
     zon_deel: zon / (app.piek_watt * aantal),
     duur_minuten: app.draaiduur_minuten,
-    uitstel_uren: app.uitstel_max_uren
+    uitstel_uren: app.uitstel_max_uren,
+    uitstel_type: app.uitstel_type || "start"
   };
 }
 
