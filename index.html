@@ -191,18 +191,21 @@ body.nacht { filter: brightness(.42); }
       </div></div>
 
       <div class="punt"><div class="teken">🔌</div><div>
-        <h3>De strook onderaan</h3>
-        <p>Wat er op dít moment door de meter gaat. Staat er <b>groen dat we
-          terugleveren</b>, dan hebben we stroom over en kost aanzetten
-          feitelijk niets.</p>
+        <h3>De strook onderaan is gemeten</h3>
+        <p>Dat zijn geen schattingen maar echte meterstanden, die elke seconde
+          binnenkomen. Staat er <b>groen dat er stroom terug het net op gaat</b>,
+          dan hebben we over en kost aanzetten feitelijk niets. Alle drie de
+          getallen kun je nakijken in de Tibber-app.</p>
       </div></div>
 
       <div class="bronnen">
-        <b>Waar de cijfers vandaan komen.</b> De prijzen en de meterstand komen
-        rechtstreeks van Tibber; de meter leest elke seconde uit. De verwachte
-        zonopbrengst komt uit het weerbericht, omgerekend naar onze panelen.
-        Het advies wordt elk half uur opnieuw berekend en kijkt vooruit tot
-        zover de prijzen bekend zijn — 's avonds dus meestal tot morgen.
+        <b>Gemeten of voorspeld?</b> De strook onderaan is <b>gemeten</b>:
+        rechtstreeks van de meter, elke seconde ververst, na te kijken in de
+        Tibber-app. De tijdvakken bovenin zijn een <b>voorspelling</b>, op basis
+        van de prijzen die Tibber een dag vooruit publiceert en de zon die het
+        weerbericht verwacht. Hoeveel zon dat precies wordt staat bewust nergens
+        als getal: dat is niet te meten, dus heb je er niets aan. Het advies
+        wordt elk half uur herberekend.
       </div>
     </div>
   </div>
@@ -232,7 +235,8 @@ function dagvoorvoegsel(d, nu) {
   if (verschil === 1) return "morgen ";
   return DAGEN[d.getDay()] + " ";
 }
-function euro(x) { return "€" + x.toFixed(2).replace(".", ","); }
+function euro(x) { return "\u20ac" + x.toFixed(2).replace(".", ","); }
+function getal(x, decimalen) { return x.toFixed(decimalen).replace(".", ","); }
 
 function duurtekst(minuten) {
   if (minuten < 60) return minuten + " min";
@@ -300,9 +304,7 @@ function toonApparaten(nu) {
       '<div class="venster">' + klokvan(s) + "–" + klokvan(e) + "</div></div>" +
       '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' + t.doen + "</div>" +
       '<div class="detail">' + t.detail + "</div>" +
-      '<div class="detail">' + euro(a.kosten) + " deze beurt" +
-      (a.zon_deel >= 0.2 ? ", " + Math.round(a.zon_deel * 100) + "% op eigen zon" : "") +
-      "</div>" +
+      '<div class="detail">' + euro(a.kosten) + " deze beurt</div>" +
       (a.duurste_start
         ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
           " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
@@ -415,16 +417,6 @@ function token() {
   try { return localStorage.getItem("tibber_token") || ""; } catch (e) { return ""; }
 }
 
-function zonNu(nu) {
-  if (!gegevens) return null;
-  var p = gegevens.prijzen;
-  for (var i = 0; i < p.length; i++) {
-    var t = new Date(p[i].t);
-    if (t <= nu && new Date(t.getTime() + 15 * 60000) > nu) return p[i].z;
-  }
-  return null;
-}
-
 function toonLive(nu) {
   var houder = document.getElementById("live");
   if (!token()) {
@@ -448,7 +440,6 @@ function toonLive(nu) {
   }
 
   var netto = meting.power - meting.powerProduction;
-  var zon = zonNu(nu);
   var html = "";
 
   /* De meter stuurt elke seconde. Blijft dat uit, dan is het getal oud en moet
@@ -459,28 +450,34 @@ function toonLive(nu) {
     : '<span class="stip dood"></span>verbinding kwijt \u2014 stand van ' +
       klokvan(new Date(metingOm));
 
+  /* Alles hier is gemeten door de Pulse en na te kijken in de Tibber-app.
+     Geen afgeleide of voorspelde getallen: daar kun je niets mee. */
   if (netto < 0) {
-    /* Bij teruglevering weten we het huisverbruik niet: de meter toont alleen
-       het saldo. Wat we w\u00e9l hard weten is dat de panelen minstens zoveel
-       leveren als er terugloopt. De aftreksom met de voorspelling zou hier een
-       negatief verbruik opleveren, en dat is onzin. */
     html += '<div class="meting terug"><div class="waarde">' + (-netto) +
-      ' W</div><div class="bij">over: zoveel kun je nu gratis gebruiken</div>' +
+      ' W</div><div class="bij">gaat nu terug het net op</div>' +
       '<div class="stand">' + stempel + '</div></div>';
-    html += '<div class="meting schatting"><div class="waarde">meer zon dan we ' +
-      'gebruiken</div><div class="bij">De panelen leveren nu minstens ' +
-      (-netto) + ' W</div><div class="stand">wat het huis zelf gebruikt is op ' +
-      'dit moment niet te meten</div></div>';
   } else {
     html += '<div class="meting afname"><div class="waarde">' + netto +
       ' W</div><div class="bij">komt er nu van het net</div>' +
       '<div class="stand">' + stempel + '</div></div>';
-    if (zon !== null) {
-      html += '<div class="meting schatting"><div class="waarde">~' +
-        (netto + zon) + ' W</div><div class="bij">gebruikt het huis</div>' +
-        '<div class="stand">gemeten ' + netto + ' W plus ~' + zon +
-        ' W verwachte zon</div></div>';
-    }
+  }
+
+  if (meting.accumulatedConsumption !== null &&
+      meting.accumulatedConsumption !== undefined) {
+    html += '<div class="meting"><div class="waarde">' +
+      getal(meting.accumulatedConsumption, 1) + ' kWh</div>' +
+      '<div class="bij">vandaag van het net</div><div class="stand">' +
+      (meting.accumulatedCost === null || meting.accumulatedCost === undefined
+        ? 'sinds middernacht'
+        : 'voor ' + euro(meting.accumulatedCost) + ', sinds middernacht') +
+      '</div></div>';
+  }
+  if (meting.accumulatedProduction !== null &&
+      meting.accumulatedProduction !== undefined) {
+    html += '<div class="meting"><div class="waarde">' +
+      getal(meting.accumulatedProduction, 1) + ' kWh</div>' +
+      '<div class="bij">vandaag teruggeleverd</div>' +
+      '<div class="stand">sinds middernacht</div></div>';
   }
   houder.innerHTML = html;
 }
@@ -520,7 +517,8 @@ function verbind() {
       herverbindNa = 3000;
       socket.send(JSON.stringify({ id: "1", type: "subscribe", payload: { query:
         'subscription{ liveMeasurement(homeId:"' + huis +
-        '"){ power powerProduction } }' } }));
+        '"){ power powerProduction accumulatedConsumption ' +
+        'accumulatedProduction accumulatedCost } }' } }));
     } else if (m.type === "next" && m.payload && m.payload.data) {
       meting = m.payload.data.liveMeasurement;
       metingOm = Date.now();
