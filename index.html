@@ -213,6 +213,7 @@ body.nacht { filter: brightness(.42); }
         weerbericht verwacht. Hoeveel zon dat precies wordt staat bewust nergens
         als getal: dat is niet te meten, dus heb je er niets aan. Het advies
         wordt elk half uur herberekend.
+        <br><span id="versie" style="opacity:.5"></span>
       </div>
     </div>
   </div>
@@ -408,7 +409,14 @@ function tekenen() {
                 tweecijfers(nu.getDate());
   var stilTe = opgehaaldOm ? (Date.now() - opgehaaldOm) / 60000 : 999;
 
-  if (gegevens.dag !== vandaag) {
+  if (!token()) {
+    status.className = "oud";
+    status.textContent = "geen token op dit apparaat — advies komt uit een " +
+      "bestand dat twee keer per dag ververst";
+  } else if (laatsteFout) {
+    status.className = "oud";
+    status.textContent = "kon niet doorrekenen: " + laatsteFout;
+  } else if (gegevens.dag !== vandaag) {
     status.className = "oud";
     status.textContent = "Let op: dit plan is van " + gegevens.dag;
   } else if (stilTe > 20) {
@@ -599,8 +607,10 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
+var VERSIE = "2026-09-09b";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
+var laatsteFout = null;
 
 function haalConfig() {
   return fetch("config.json?t=" + Date.now()).then(function (a) {
@@ -863,6 +873,7 @@ function bereken() {
         prijzen: reeks
       };
       opgehaaldOm = Date.now();
+      laatsteFout = null;
       try {
         localStorage.setItem("stroomtip", JSON.stringify(gegevens));
       } catch (e) {}
@@ -871,6 +882,7 @@ function bereken() {
     .catch(function (fout) {
       /* Mislukt het, dan blijft het laatst bekende advies staan; de statusregel
          onderin meldt vanzelf dat de gegevens verouderen. */
+      laatsteFout = fout && fout.message ? fout.message : String(fout);
       if (window.console) console.log("berekenen mislukt:", fout);
       tekenen();
     });
@@ -878,6 +890,9 @@ function bereken() {
 
 var sluier = document.getElementById("sluier");
 function toonUitleg(aan) { sluier.style.display = aan ? "block" : "none"; }
+document.getElementById("versie").textContent =
+  "versie " + VERSIE + " \u00b7 " +
+  (token() ? "token aanwezig, rekent zelf" : "geen token, gebruikt bestand");
 document.getElementById("uitlegknop").onclick = function () { toonUitleg(true); };
 document.getElementById("sluit").onclick = function () { toonUitleg(false); };
 /* Buiten het kader tikken sluit ook; dat verwacht iedereen. */
