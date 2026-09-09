@@ -887,11 +887,30 @@ function vernieuwen() {
   if (token()) { bereken(); } else { ophalen(); }
 }
 
+/* Dit scherm hangt maandenlang aan de muur en laadt zichzelf nooit opnieuw.
+   Zonder deze controle blijft het draaien op de versie van de dag dat het is
+   opgehangen, en komt een verbetering er nooit meer in. We vragen daarom af en
+   toe of het bestand op de server nog hetzelfde is, en herladen zo ja niet. */
+var eigenVersie = null;
+
+function versieCheck() {
+  fetch(window.location.pathname + "?v=" + Date.now(), { method: "HEAD" })
+    .then(function (a) {
+      var kenmerk = a.headers.get("etag") || a.headers.get("last-modified");
+      if (!kenmerk) return;
+      if (eigenVersie === null) { eigenVersie = kenmerk; return; }
+      if (kenmerk !== eigenVersie) { window.location.reload(); }
+    })
+    .catch(function () {});
+}
+
 tekenen();
 vernieuwen();
 verbind();
 setInterval(tekenen, 10000);       // klok en toestand bijhouden
 setInterval(vernieuwen, 300000);   // elke vijf minuten opnieuw doorrekenen
+versieCheck();
+setInterval(versieCheck, 900000);  // elk kwartier kijken of er een nieuwe versie is
 </script>
 </body>
 </html>
