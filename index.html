@@ -74,10 +74,16 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .meting { -webkit-box-flex: 1; flex: 1 1 0; }
 .meting .waarde { font-size: 34px; font-weight: 700;
                   font-variant-numeric: tabular-nums; }
-.meting .bij { font-size: 17px; color: var(--gedempt); margin-top: 2px; }
+.meting .bij { font-size: 17px; color: var(--tekst); margin-top: 2px; }
+.meting .stand { font-size: 14px; color: var(--gedempt); margin-top: 2px; }
+.stip { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+        background: var(--nu); margin-right: 7px; vertical-align: middle; }
+.stip.dood { background: var(--duur); }
 .terug .waarde { color: var(--nu); }
 .afname .waarde { color: var(--tekst); }
-.schatting .waarde { color: var(--gedempt); font-weight: 600; }
+.schatting .waarde { color: var(--gedempt); font-weight: 600;
+                     font-size: 25px; line-height: 1.15; }
+.meting { padding-right: 24px; }
 .tokenveld { width: 100%; font-size: 19px; padding: 9px 12px; border-radius: 8px;
              border: 1px solid var(--rand); background: var(--kaart);
              color: var(--tekst); font-family: inherit; }
@@ -294,10 +300,14 @@ function toonApparaten(nu) {
       '<div class="venster">' + klokvan(s) + "–" + klokvan(e) + "</div></div>" +
       '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' + t.doen + "</div>" +
       '<div class="detail">' + t.detail + "</div>" +
-      '<div class="detail">' + euro(a.kosten) + " deze beurt · " +
-      euro(a.besparing) + " goedkoper" +
-      (a.zon_deel >= 0.2 ? " · " + Math.round(a.zon_deel * 100) + "% eigen zon" : "") +
-      "</div></div></div>";
+      '<div class="detail">' + euro(a.kosten) + " deze beurt" +
+      (a.zon_deel >= 0.2 ? ", " + Math.round(a.zon_deel * 100) + "% op eigen zon" : "") +
+      "</div>" +
+      (a.duurste_start
+        ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
+          " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
+        : "") +
+      "</div></div>";
   }
   houder.innerHTML = html;
 }
@@ -385,7 +395,8 @@ function tekenen() {
     status.textContent = "Let op: dit is het plan van " + gegevens.dag;
   } else {
     status.className = "";
-    status.textContent = "bijgewerkt " + klokvan(new Date(gegevens.gemaakt));
+    status.textContent = "advies berekend om " +
+      klokvan(new Date(gegevens.gemaakt));
   }
 }
 
@@ -396,6 +407,7 @@ function tekenen() {
 var WS_ADRES = "wss://websocket-api.tibber.com/v1-beta/gql/subscriptions";
 var huis = null;
 var meting = null;
+var metingOm = 0;          // wanneer de laatste meting binnenkwam
 var socket = null;
 var herverbindNa = 3000;
 
@@ -439,19 +451,36 @@ function toonLive(nu) {
   var zon = zonNu(nu);
   var html = "";
 
+  /* De meter stuurt elke seconde. Blijft dat uit, dan is het getal oud en moet
+     het scherm dat zeggen in plaats van het stil te laten staan. */
+  var levend = (Date.now() - metingOm) < 30000;
+  var stempel = levend
+    ? '<span class="stip"></span>live van de meter'
+    : '<span class="stip dood"></span>verbinding kwijt \u2014 stand van ' +
+      klokvan(new Date(metingOm));
+
   if (netto < 0) {
+    /* Bij teruglevering weten we het huisverbruik niet: de meter toont alleen
+       het saldo. Wat we w\u00e9l hard weten is dat de panelen minstens zoveel
+       leveren als er terugloopt. De aftreksom met de voorspelling zou hier een
+       negatief verbruik opleveren, en dat is onzin. */
     html += '<div class="meting terug"><div class="waarde">' + (-netto) +
-      ' W</div><div class="bij">over — nu gratis te gebruiken</div></div>';
+      ' W</div><div class="bij">over: zoveel kun je nu gratis gebruiken</div>' +
+      '<div class="stand">' + stempel + '</div></div>';
+    html += '<div class="meting schatting"><div class="waarde">meer zon dan we ' +
+      'gebruiken</div><div class="bij">De panelen leveren nu minstens ' +
+      (-netto) + ' W</div><div class="stand">wat het huis zelf gebruikt is op ' +
+      'dit moment niet te meten</div></div>';
   } else {
     html += '<div class="meting afname"><div class="waarde">' + netto +
-      ' W</div><div class="bij">van het net</div></div>';
-  }
-
-  if (zon !== null) {
-    html += '<div class="meting schatting"><div class="waarde">~' + (netto + zon) +
-      ' W</div><div class="bij">verbruik in huis (schatting)</div></div>';
-    html += '<div class="meting schatting"><div class="waarde">~' + zon +
-      ' W</div><div class="bij">uit je panelen (voorspeld)</div></div>';
+      ' W</div><div class="bij">komt er nu van het net</div>' +
+      '<div class="stand">' + stempel + '</div></div>';
+    if (zon !== null) {
+      html += '<div class="meting schatting"><div class="waarde">~' +
+        (netto + zon) + ' W</div><div class="bij">gebruikt het huis</div>' +
+        '<div class="stand">gemeten ' + netto + ' W plus ~' + zon +
+        ' W verwachte zon</div></div>';
+    }
   }
   houder.innerHTML = html;
 }
@@ -494,6 +523,7 @@ function verbind() {
         '"){ power powerProduction } }' } }));
     } else if (m.type === "next" && m.payload && m.payload.data) {
       meting = m.payload.data.liveMeasurement;
+      metingOm = Date.now();
       toonLive(new Date());
     }
   };
