@@ -626,7 +626,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-09b";        // staat in het uitlegvenster
+var VERSIE = "2026-09-09c";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -634,7 +634,11 @@ var laatsteFout = null;
 function haalConfig() {
   return fetch("config.json?t=" + Date.now()).then(function (a) {
     return a.json();
-  }).then(function (c) { config = c; return c; });
+  }).then(function (c) { config = c; return c; })
+    .catch(function () {
+      if (config) return config;      // val terug op wat we al hadden
+      throw new Error("kon de instellingen niet ophalen");
+    });
 }
 
 function tibberVraag(query) {
@@ -858,7 +862,9 @@ function knipoog(slots, apparaten, nu) {
 
 function bereken() {
   if (!token()) { tekenen(); return Promise.resolve(); }
-  return (config ? Promise.resolve(config) : haalConfig())
+  /* Elke ronde opnieuw ophalen. Het bestand is een kilobyte, en anders blijft
+     een gewijzigd apparaat of tarief hangen tot iemand handmatig herlaadt. */
+  return haalConfig()
     .then(function () { return Promise.all([haalPrijzen(), haalZon()]); })
     .then(function (r) {
       var slots = r[0], zon = r[1];
