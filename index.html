@@ -67,8 +67,24 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .wanneer { font-size: 25px; font-weight: 600; color: var(--straks);
            letter-spacing: .04em; margin-bottom: 4px; }
 
+/* Wat er op dit moment door de meter gaat */
+.live { display: -webkit-box; display: flex; -webkit-box-align: center;
+        align-items: center; height: 78px; min-height: 78px;
+        margin-top: 14px; border-top: 1px solid var(--rand); padding-top: 12px; }
+.meting { -webkit-box-flex: 1; flex: 1 1 0; }
+.meting .waarde { font-size: 34px; font-weight: 700;
+                  font-variant-numeric: tabular-nums; }
+.meting .bij { font-size: 17px; color: var(--gedempt); margin-top: 2px; }
+.terug .waarde { color: var(--nu); }
+.afname .waarde { color: var(--tekst); }
+.schatting .waarde { color: var(--gedempt); font-weight: 600; }
+.tokenveld { width: 100%; font-size: 19px; padding: 9px 12px; border-radius: 8px;
+             border: 1px solid var(--rand); background: var(--kaart);
+             color: var(--tekst); font-family: inherit; }
+
 /* Prijsverloop van de dag */
-.grafiek { height: 122px; margin-top: 16px; position: relative; }
+.grafiek { height: 100px; min-height: 100px; margin-top: 18px;
+           position: relative; }
 .balken { position: absolute; left: 0; right: 0; bottom: 20px; top: 0;
           display: -webkit-box; display: flex; -webkit-box-align: end;
           align-items: flex-end; }
@@ -96,6 +112,8 @@ body.nacht { filter: brightness(.42); }
   </div>
 
   <div class="apparaten" id="apparaten"></div>
+
+  <div class="live" id="live"></div>
 
   <div class="grafiek">
     <div class="balken" id="balken"></div>
@@ -152,11 +170,16 @@ function advies(app, nu) {
   }
   if (totStart > 0) {
     if (totStart <= app.uitstel_uren * 60) {
-      var uitstel = Math.round(totStart / 30) / 2;
-      var geschreven = uitstel === Math.floor(uitstel)
-            ? uitstel : String(uitstel).replace(".", ",");
-      return { klasse: "", doen: "Nu aanzetten met " + geschreven +
-               (uitstel === 1 ? " uur" : " uur") + " uitstel",
+      var afgerond = Math.round(totStart / 30) * 30;
+      var geschreven;
+      if (afgerond < 60) {
+        geschreven = afgerond + " min";
+      } else {
+        var uur = Math.round(afgerond / 30) / 2;
+        geschreven = (uur === Math.floor(uur) ? uur : String(uur).replace(".", ","))
+                     + " uur";
+      }
+      return { klasse: "", doen: "Nu aanzetten met " + geschreven + " uitstel",
                detail: "Of om " + klokvan(start) + " gewoon op start drukken." };
     }
     return { klasse: "", wacht: true, doen: "Over " + duurtekst(totStart),
@@ -270,6 +293,7 @@ function tekenen() {
 
   toonApparaten(nu);
   toonGrafiek(nu);
+  toonLive(nu);
 
   /* Data van gisteren is misleidend, dus dat zeggen we erbij. */
   var status = document.getElementById("status");
@@ -282,6 +306,104 @@ function tekenen() {
     status.className = "";
     status.textContent = "bijgewerkt " + klokvan(new Date(gegevens.gemaakt));
   }
+}
+
+/* ---- Live meting via de Tibber Pulse ----------------------------------
+   Het token staat alleen in de browser van deze iPad, nooit in de openbare
+   repo. Wie de pagina elders opent ziet dit blok simpelweg niet. */
+
+var HUIS = "ca114d38-3f5f-4a5b-aab4-b1c6fdcb9b6e";
+var WS_ADRES = "wss://websocket-api.tibber.com/v1-beta/gql/subscriptions";
+var meting = null;
+var socket = null;
+var herverbindNa = 3000;
+
+function token() {
+  try { return localStorage.getItem("tibber_token") || ""; } catch (e) { return ""; }
+}
+
+function zonNu(nu) {
+  if (!gegevens) return null;
+  var p = gegevens.prijzen;
+  for (var i = 0; i < p.length; i++) {
+    var t = new Date(p[i].t);
+    if (t <= nu && new Date(t.getTime() + 15 * 60000) > nu) return p[i].z;
+  }
+  return null;
+}
+
+function toonLive(nu) {
+  var houder = document.getElementById("live");
+  if (!token()) {
+    houder.innerHTML = '<div class="meting" style="flex:1"><input class="tokenveld" ' +
+      'id="tokenveld" placeholder="Tibber-token plakken om het live verbruik te tonen">' +
+      "</div>";
+    var veld = document.getElementById("tokenveld");
+    veld.onchange = function () {
+      var waarde = veld.value.replace(/\s/g, "");
+      if (!waarde) return;
+      try { localStorage.setItem("tibber_token", waarde); } catch (e) {}
+      verbind();
+      tekenen();
+    };
+    return;
+  }
+  if (!meting) {
+    houder.innerHTML = '<div class="meting"><div class="bij">' +
+      "Verbinden met de Pulse…</div></div>";
+    return;
+  }
+
+  var netto = meting.power - meting.powerProduction;
+  var zon = zonNu(nu);
+  var html = "";
+
+  if (netto < 0) {
+    html += '<div class="meting terug"><div class="waarde">' + (-netto) +
+      ' W</div><div class="bij">over — nu gratis te gebruiken</div></div>';
+  } else {
+    html += '<div class="meting afname"><div class="waarde">' + netto +
+      ' W</div><div class="bij">van het net</div></div>';
+  }
+
+  if (zon !== null) {
+    html += '<div class="meting schatting"><div class="waarde">~' + (netto + zon) +
+      ' W</div><div class="bij">verbruik in huis (schatting)</div></div>';
+    html += '<div class="meting schatting"><div class="waarde">~' + zon +
+      ' W</div><div class="bij">uit je panelen (voorspeld)</div></div>';
+  }
+  houder.innerHTML = html;
+}
+
+function verbind() {
+  if (!token() || !window.WebSocket) return;
+  try { socket = new WebSocket(WS_ADRES, "graphql-transport-ws"); }
+  catch (e) { return; }
+
+  socket.onopen = function () {
+    socket.send(JSON.stringify({ type: "connection_init",
+                                 payload: { token: token() } }));
+  };
+  socket.onmessage = function (e) {
+    var m = JSON.parse(e.data);
+    if (m.type === "connection_ack") {
+      herverbindNa = 3000;
+      socket.send(JSON.stringify({ id: "1", type: "subscribe", payload: { query:
+        'subscription{ liveMeasurement(homeId:"' + HUIS +
+        '"){ power powerProduction } }' } }));
+    } else if (m.type === "next" && m.payload && m.payload.data) {
+      meting = m.payload.data.liveMeasurement;
+      toonLive(new Date());
+    }
+  };
+  /* Het scherm hangt er dagen achtereen, dus een verbroken verbinding moet
+     zichzelf herstellen. Bij aanhoudende problemen steeds rustiger proberen. */
+  socket.onclose = function () {
+    socket = null;
+    setTimeout(verbind, herverbindNa);
+    herverbindNa = Math.min(herverbindNa * 2, 120000);
+  };
+  socket.onerror = function () { if (socket) socket.close(); };
 }
 
 function ophalen() {
@@ -309,6 +431,7 @@ try {
 
 tekenen();
 ophalen();
+verbind();
 setInterval(tekenen, 10000);       // klok en toestand bijhouden
 setInterval(ophalen, 300000);      // elke vijf minuten verse gegevens
 </script>
