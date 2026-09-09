@@ -438,6 +438,18 @@ function token() {
   try { return localStorage.getItem("tibber_token") || ""; } catch (e) { return ""; }
 }
 
+/* Een token van drieënveertig tekens overtypen op een tablet gaat een keer mis.
+   Daarom mag het ook via de link meekomen: ?token=... wordt hier opgeslagen en
+   meteen uit de adresbalk gehaald, zodat het niet in beeld blijft staan. */
+(function () {
+  var m = window.location.search.match(/[?&]token=([^&]+)/);
+  if (!m) return;
+  try { localStorage.setItem("tibber_token", decodeURIComponent(m[1])); } catch (e) {}
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+})();
+
 function toonLive(nu) {
   var houder = document.getElementById("live");
   if (!token()) {
