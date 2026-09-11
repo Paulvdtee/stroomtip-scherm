@@ -70,8 +70,11 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .naam { font-size: 27px; font-weight: 600; color: var(--gedempt);
         letter-spacing: .02em; }
 .kaart.actief .naam { color: var(--nu); }
-.venster { font-size: 76px; font-weight: 700; letter-spacing: -0.035em;
-           line-height: 1; font-variant-numeric: tabular-nums; }
+/* 70 en niet 76: met de spaties rond het streepje past een tijdvak anders
+   net niet meer in een kaart als er maar twee apparaten staan. */
+.venster { font-size: 70px; font-weight: 700; letter-spacing: -0.035em;
+           line-height: 1; font-variant-numeric: tabular-nums;
+           white-space: nowrap; }
 .doen { font-size: 29px; font-weight: 600; line-height: 1.25; }
 .kaart.actief .doen { color: var(--nu); }
 .wachten { color: var(--straks); }
@@ -583,7 +586,8 @@ function toonApparaten(nu) {
       '<div class="midden">' +
       (dagvoorvoegsel(s, nu) ? '<div class="wanneer">' +
         dagvoorvoegsel(s, nu).toUpperCase().replace(" ", "") + "</div>" : "") +
-      '<div class="venster">' + klokvan(s) + "–" + klokvan(e) + "</div></div>";
+      '<div class="venster">' + klokvan(s) + "\u00a0–\u00a0" + klokvan(e) +
+      "</div></div>";
 
     if (af) {
       html += '<div><div class="doen gedaanregel">✓ Gedraaid om ' +
@@ -909,7 +913,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-11a";        // staat in het uitlegvenster
+var VERSIE = "2026-09-11b";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
