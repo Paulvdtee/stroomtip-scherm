@@ -56,7 +56,7 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .kaart:last-child { margin-right: 0; }
 .apparaten.drie .kaart { padding: 18px 20px 20px; margin-right: 14px; }
 .apparaten.drie .naam { font-size: 21px; }
-.apparaten.drie .venster { font-size: 46px; letter-spacing: -0.04em; }
+.apparaten.drie .venster { font-size: 43px; letter-spacing: -0.04em; }
 .apparaten.drie .doen { font-size: 23px; }
 .apparaten.drie .detail { font-size: 16px; margin-top: 6px; }
 .apparaten.drie .wanneer { font-size: 19px; }
@@ -70,11 +70,12 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .naam { font-size: 27px; font-weight: 600; color: var(--gedempt);
         letter-spacing: .02em; }
 .kaart.actief .naam { color: var(--nu); }
-/* 70 en niet 76: met de spaties rond het streepje past een tijdvak anders
-   net niet meer in een kaart als er maar twee apparaten staan. */
-.venster { font-size: 70px; font-weight: 700; letter-spacing: -0.035em;
+/* Kleiner dan de 76 van vroeger: met lucht rond het streepje past een tijdvak
+   anders net niet meer in een kaart als er maar twee apparaten staan. */
+.venster { font-size: 68px; font-weight: 700; letter-spacing: -0.035em;
            line-height: 1; font-variant-numeric: tabular-nums;
            white-space: nowrap; }
+.streep { margin: 0 .22em; }
 .doen { font-size: 29px; font-weight: 600; line-height: 1.25; }
 .kaart.actief .doen { color: var(--nu); }
 .wachten { color: var(--straks); }
@@ -586,8 +587,8 @@ function toonApparaten(nu) {
       '<div class="midden">' +
       (dagvoorvoegsel(s, nu) ? '<div class="wanneer">' +
         dagvoorvoegsel(s, nu).toUpperCase().replace(" ", "") + "</div>" : "") +
-      '<div class="venster">' + klokvan(s) + "\u00a0–\u00a0" + klokvan(e) +
-      "</div></div>";
+      '<div class="venster">' + klokvan(s) +
+      '<span class="streep">–</span>' + klokvan(e) + "</div></div>";
 
     if (af) {
       html += '<div><div class="doen gedaanregel">✓ Gedraaid om ' +
@@ -913,7 +914,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-11b";        // staat in het uitlegvenster
+var VERSIE = "2026-09-11c";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
