@@ -61,6 +61,11 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .apparaten.drie .detail { font-size: 16px; margin-top: 6px; }
 .apparaten.drie .wanneer { font-size: 19px; }
 .kaart.actief { background: var(--nu-dof); border-color: var(--nu); }
+/* Een afgevinkte beurt blijft staan maar treedt terug: het advies is op. */
+.kaart.gedaan { opacity: .5; }
+.kaart.tikbaar { cursor: pointer; }
+.gedaanregel { color: var(--nu); }
+.tiphint { font-style: italic; opacity: .7; }
 
 .naam { font-size: 27px; font-weight: 600; color: var(--gedempt);
         letter-spacing: .02em; }
@@ -111,6 +116,41 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 
 .voet { display: flex; justify-content: space-between; align-items: baseline;
         margin-top: 6px; font-size: 18px; color: var(--gedempt); }
+.voet > span { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+               white-space: nowrap; }
+.knipoog { -webkit-box-flex: 1; flex: 1 1 auto; }
+.logknop { -webkit-box-flex: 0; flex: 0 0 auto;
+           cursor: pointer; text-decoration: underline; color: var(--nu);
+           padding: 0 18px; }
+.logknop.leeg { color: var(--gedempt); text-decoration: none;
+                font-style: italic; }
+.logknop.rood { color: var(--duur); }
+
+/* Het overzicht van wat het heeft opgeleverd */
+.logtotaal { font-size: 56px; font-weight: 700; letter-spacing: -0.03em;
+             color: var(--nu); line-height: 1.05; }
+.logtotaal.rood { color: var(--duur); }
+.logbij { font-size: 18px; color: var(--gedempt); margin: 2px 0 18px; }
+.loguitleg { font-size: 16px; line-height: 1.5; color: var(--gedempt);
+             margin: 16px 0 0; }
+.loguitleg.bovenaan { margin: 0 0 18px; }
+.loguitleg b { color: var(--tekst); font-weight: 600; }
+.logtabel { border-top: 1px solid var(--rand); }
+.logrij { display: -webkit-box; display: flex; -webkit-box-align: baseline;
+          align-items: baseline; border-bottom: 1px solid var(--rand);
+          padding: 8px 0; font-size: 17px; }
+.logdag { width: 130px; min-width: 130px; color: var(--gedempt);
+          font-variant-numeric: tabular-nums; }
+.lognaam { -webkit-box-flex: 1; flex: 1 1 auto; min-width: 0;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logkosten { width: 130px; min-width: 130px; text-align: right;
+             color: var(--gedempt); font-variant-numeric: tabular-nums; }
+.logwinst { width: 100px; min-width: 100px; text-align: right;
+            color: var(--nu); font-weight: 600;
+            font-variant-numeric: tabular-nums; }
+.logwinst.verlies { color: var(--duur); }
+.logweg { width: 38px; min-width: 38px; text-align: right; cursor: pointer;
+          color: var(--gedempt); font-size: 20px; }
 .knipoog { font-style: italic; }
 .oud { color: var(--duur); }
 
@@ -186,8 +226,17 @@ body.nacht { filter: brightness(.42); }
       <div class="punt"><div class="teken">🕐</div><div>
         <h3>Wat je moet doen</h3>
         <p>Bij elk apparaat staat het gunstige tijdvak. Kleurt de kaart
-          <b>groen</b>, dan is het zover: gewoon aanzetten. Anders staat erbij
-          hoeveel uur uitstel je moet instellen om er precies in te vallen.</p>
+          <b>groen</b>, dan is het zover: gewoon aanzetten. Staat het later op
+          de dag, dan weet je nu welke uitstelstand je moet zoeken — dat
+          rekent elke machine net anders.</p>
+      </div></div>
+
+      <div class="punt"><div class="teken">✓</div><div>
+        <h3>Tik erop als je hem aanzet</h3>
+        <p>Dan onthoudt het scherm die beurt en telt het op wat hij scheelde
+          ten opzichte van een doorsnee moment. Onderin staat de stand;
+          <b>tik daarop</b> voor het hele overzicht. Vergist? Nog een keer
+          tikken haalt hem weer weg.</p>
       </div></div>
 
       <div class="punt"><div class="teken">☀️</div><div>
@@ -221,8 +270,19 @@ body.nacht { filter: brightness(.42); }
     </div>
   </div>
 
+  <div class="sluier" id="logsluier" style="display:none">
+    <div class="uitleg">
+      <span class="sluit" id="logsluit">&times;</span>
+      <h2>Wat het heeft opgeleverd</h2>
+      <p class="inleiding">De beurten die we op een gunstig moment hebben
+        gedraaid, en wat dat scheelde.</p>
+      <div id="loginhoud"></div>
+    </div>
+  </div>
+
   <div class="voet">
     <span class="knipoog" id="knipoog"></span>
+    <span class="logknop leeg" id="logknop"></span>
     <span id="status"></span>
   </div>
 
@@ -255,15 +315,15 @@ function duurtekst(minuten) {
   return m === 0 ? u + " uur" : u + " uur " + m + " min";
 }
 
-/* Wat moet je nu doen met dit apparaat? Dat hangt af van waar we in de dag
-   zitten en hoe ver de uitstelknop reikt. */
+/* Wat is er nu aan de hand met dit apparaat? Het scherm noemt alleen het
+   tijdvak. Hoeveel uitstel daarvoor nodig is verschilt per machine \u2014 de een
+   vraagt wanneer hij mag beginnen, de ander wanneer hij klaar moet zijn \u2014 en
+   dat reken je bij de knop makkelijker uit dan je het hier leest. */
 function advies(app, nu) {
   var start = new Date(app.start), eind = new Date(app.eind);
   var totStart = Math.round((start - nu) / 60000);
   var totEind = Math.round((eind - nu) / 60000);
 
-  /* Een kwartier voor de start is uitstel instellen zinloos: dan is nu
-     aanzetten hetzelfde. */
   if (totStart <= 15 && totEind > 0) {
     return { klasse: "actief", doen: "NU AANZETTEN",
              detail: totStart > 0
@@ -271,39 +331,229 @@ function advies(app, nu) {
                : "Het gunstige blok loopt nog " + duurtekst(totEind) + "." };
   }
   if (totStart > 0) {
-    /* Twee soorten uitstelknoppen. Bij "eind" stel je in wanneer hij klaar
-       moet zijn en rekent de machine zelf terug; dan moet de hele beurt binnen
-       het bereik passen, en luidt de instructie heel anders. */
-    var eindStand = app.uitstel_type === "eind";
-    var bereik = app.uitstel_uren * 60;
-    var nodig = eindStand ? totEind : totStart;
-
-    if (nodig <= bereik) {
-      var afgerond = Math.round(nodig / 30) * 30;
-      var geschreven;
-      if (afgerond < 60) {
-        geschreven = afgerond + " min";
-      } else {
-        var uur = Math.round(afgerond / 30) / 2;
-        geschreven = (uur === Math.floor(uur) ? uur : String(uur).replace(".", ","))
-                     + " uur";
-      }
-      return eindStand
-        ? { klasse: "", doen: "Nu aanzetten, klaar over " + geschreven,
-            detail: "Deze machine vraagt wann\u00e9\u00e9r hij klaar moet zijn; hij "
-                    + "begint dan vanzelf om " + klokvan(start) + "." }
-        : { klasse: "", doen: "Nu aanzetten met " + geschreven + " uitstel",
-            detail: "Of om " + klokvan(start) + " gewoon op start drukken." };
-    }
-    return { klasse: "", wacht: true, doen: "Over " + duurtekst(totStart),
-             detail: eindStand
-               ? "Te vroeg: hij kan hooguit " + app.uitstel_uren
-                 + " uur vooruit klaar zijn."
-               : "Te vroeg om in te stellen; de uitstelknop reikt "
-                 + app.uitstel_uren + " uur vooruit." };
+    return { klasse: "", wacht: true, doen: "Over " + duurtekst(totStart) };
   }
   return { klasse: "", doen: "Blok voorbij",
            detail: "Vanaf hier wordt stroom alleen maar duurder." };
+}
+
+/* ---- Logboek: wat leverde het op ---------------------------------------
+   Tik je op een kaart, dan noteren we dat we die beurt op dit moment hebben
+   gedraaid, met wat hij kost en wat hij gemiddeld gekost zou hebben. Alles
+   staat in de browseropslag van dit apparaat; er is geen server. Wist iemand
+   de opslag van de iPad, dan is de geschiedenis ook weg. */
+
+var LOGSLEUTEL = "stroomtip_log";
+
+function logLezen() {
+  try {
+    var rauw = localStorage.getItem(LOGSLEUTEL);
+    var lijst = rauw ? JSON.parse(rauw) : [];
+    return Object.prototype.toString.call(lijst) === "[object Array]" ? lijst : [];
+  } catch (e) { return []; }
+}
+
+function logSchrijven(lijst) {
+  try { localStorage.setItem(LOGSLEUTEL, JSON.stringify(lijst)); } catch (e) {}
+}
+
+function dagsleutel(d) {
+  return d.getFullYear() + "-" + tweecijfers(d.getMonth() + 1) + "-" +
+         tweecijfers(d.getDate());
+}
+
+function gedraaidVandaag(naam, nu) {
+  var lijst = logLezen(), dag = dagsleutel(nu);
+  for (var i = 0; i < lijst.length; i++) {
+    if (lijst[i].naam === naam && lijst[i].dag === dag) return lijst[i];
+  }
+  return null;
+}
+
+/* Zonder verbruik en zonder vergelijkingsmaatstaf valt er niets eerlijks te
+   tellen. Dan is de kaart gewoon niet tikbaar, in plaats van dat we een getal
+   verzinnen. Dat overkomt alleen wie de pagina zonder token opent op een
+   bestand van voor deze wijziging. */
+function teRegistreren(a) {
+  return a && typeof a.verbruik_kwh === "number" &&
+         typeof a.gemiddelde_kosten === "number";
+}
+
+/* Wat kost deze beurt als hij nu begint? De kale kwartierprijzen bij elkaar,
+   zonder zonweging: op de rekening staan euro's, geen afwegingen. Reikt de
+   prijsreeks niet ver genoeg, dan rekenen we de rest door tegen het gemiddelde
+   van wat we wel weten. */
+function kostenVanaf(nu, duurMinuten, kwh) {
+  var p = gegevens && gegevens.prijzen ? gegevens.prijzen : [];
+  var aantal = Math.round(duurMinuten / 15);
+  if (!p.length || aantal < 1) return null;
+  var begin = -1;
+  for (var i = 0; i < p.length; i++) {
+    var t = new Date(p[i].t);
+    if (t <= nu && new Date(t.getTime() + 900000) > nu) { begin = i; break; }
+  }
+  if (begin < 0) return null;
+  var som = 0, tel = 0;
+  for (var j = begin; j < p.length && tel < aantal; j++) { som += p[j].p; tel++; }
+  return tel ? som / tel * kwh : null;
+}
+
+function besparingszin(bespaard) {
+  if (bespaard >= 0.005) {
+    return euro(bespaard) + " goedkoper dan een doorsnee moment.";
+  }
+  if (bespaard <= -0.005) {
+    return euro(-bespaard) + " duurder dan een doorsnee moment.";
+  }
+  return "Even duur als een doorsnee moment.";
+}
+
+/* Een tik registreert de beurt; nog een tik neemt hem terug. Aan de muur is
+   een misklik zo gezet, en die moet je kunnen herstellen. */
+function registreer(index) {
+  if (!gegevens || !gegevens.apparaten) return;
+  var a = gegevens.apparaten[index];
+  if (!teRegistreren(a)) return;
+  var nu = new Date();
+  var lijst = logLezen();
+  var af = gedraaidVandaag(a.naam, nu);
+  if (af) {
+    for (var i = 0; i < lijst.length; i++) {
+      if (lijst[i].naam === af.naam && lijst[i].dag === af.dag) {
+        lijst.splice(i, 1);
+        break;
+      }
+    }
+    logSchrijven(lijst);
+    tekenen();
+    return;
+  }
+  /* Wat hij nu kost, niet wat het geplande venster kostte: je kunt ook
+     buiten het venster op de kaart tikken, en dan hoort daar het eerlijke
+     bedrag bij. Lukt dat niet, dan valt het terug op het venster zelf. */
+  var kosten = kostenVanaf(nu, a.duur_minuten, a.verbruik_kwh);
+  if (kosten === null) kosten = a.kosten;
+  if (typeof kosten !== "number") return;
+  lijst.push({
+    dag: dagsleutel(nu),
+    tijd: nu.toISOString(),
+    naam: a.naam,
+    emoji: a.emoji || "",
+    kwh: a.verbruik_kwh,
+    kosten: kosten,
+    referentie: a.gemiddelde_kosten,
+    bespaard: a.gemiddelde_kosten - kosten
+  });
+  logSchrijven(lijst);
+  tekenen();
+}
+
+function logTotaal(vanaf) {
+  var lijst = logLezen(), som = 0, aantal = 0, eerste = null;
+  for (var i = 0; i < lijst.length; i++) {
+    var t = new Date(lijst[i].tijd);
+    if (vanaf && t < vanaf) continue;
+    som += lijst[i].bespaard;
+    aantal++;
+    if (eerste === null || t < eerste) eerste = t;
+  }
+  return { som: som, aantal: aantal, eerste: eerste };
+}
+
+var MAANDEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli",
+               "augustus", "september", "oktober", "november", "december"];
+
+function beurten(aantal) {
+  return aantal + (aantal === 1 ? " beurt" : " beurten");
+}
+
+/* De teller kan onder nul zakken: zet je alles op de verkeerde momenten aan,
+   dan kost het geld. Dat hoort er dan ook zo te staan, en niet als een
+   "besparing" met een minteken ervoor. */
+function toonLogknop() {
+  var knop = document.getElementById("logknop");
+  var alles = logTotaal(null);
+  if (!alles.aantal) {
+    knop.className = "logknop leeg";
+    knop.textContent = "nog niets geteld";
+    return;
+  }
+  /* Kort houden: de statusregel ernaast is lang, en het aantal beurten staat
+     in het overzicht dat hierachter zit. */
+  knop.className = "logknop" + (alles.som < 0 ? " rood" : "");
+  knop.textContent = euro(Math.abs(alles.som)) +
+    (alles.som < 0 ? " duurder uit" : " bespaard");
+}
+
+function toonLogboek() {
+  var lijst = logLezen().slice();
+  lijst.sort(function (a, b) { return new Date(b.tijd) - new Date(a.tijd); });
+
+  var nu = new Date();
+  var maandStart = new Date(nu.getFullYear(), nu.getMonth(), 1);
+  var alles = logTotaal(null);
+  var maand = logTotaal(maandStart);
+
+  var html = '<div class="logtotaal' + (alles.som < 0 ? " rood" : "") + '">' +
+    euro(Math.abs(alles.som)) + "</div>" +
+    '<div class="logbij">' +
+    (alles.aantal
+      ? (alles.som < 0 ? "duurder uit" : "bespaard") + " in " +
+        beurten(alles.aantal) +
+        (alles.eerste ? " sinds " + alles.eerste.getDate() + " " +
+          MAANDEN[alles.eerste.getMonth()] : "") +
+        " \u00b7 deze maand " + (maand.som < 0 ? "\u2212" : "") +
+        euro(Math.abs(maand.som))
+      : "nog niets geregistreerd") +
+    "</div>";
+
+  /* Meteen onder het getal, niet onder de lijst: waar het tegen afgezet
+     wordt bepaalt of je het getal kunt geloven, en daar moet je niet eerst
+     langs twintig regels voor scrollen. */
+  html += '<p class="loguitleg bovenaan"><b>Waar zetten we het tegen af?</b> ' +
+    "Tegen wat dezelfde beurt gemiddeld had gekost als je hem op een " +
+    "willekeurig ander toegestaan moment van diezelfde dag had aangezet. Niet " +
+    "tegen het duurste moment: dat vleit, want zo laat draai je in de " +
+    "praktijk toch niet. Zet je hem op een slecht moment aan, dan telt dat " +
+    "er gewoon vanaf.</p>";
+
+  if (!lijst.length) {
+    html += '<p class="loguitleg">Tik op het scherm op de vaatwasser of de was ' +
+      "op het moment dat je hem aanzet. Dan noteren we wat die beurt kost en " +
+      "wat hij gemiddeld gekost zou hebben, en groeit deze teller vanzelf.</p>";
+  } else {
+    html += '<div class="logtabel">';
+    for (var i = 0; i < lijst.length && i < 25; i++) {
+      var r = lijst[i], d = new Date(r.tijd);
+      html += '<div class="logrij">' +
+        '<span class="logdag">' + d.getDate() + " " +
+        MAANDEN[d.getMonth()].slice(0, 3) + " " + klokvan(d) + "</span>" +
+        '<span class="lognaam">' + (r.emoji ? r.emoji + " " : "") + r.naam +
+        "</span>" +
+        '<span class="logkosten">' + euro(r.kosten) + " betaald</span>" +
+        '<span class="logwinst' + (r.bespaard < 0 ? " verlies" : "") + '">' +
+        (r.bespaard < 0 ? "\u2212" : "+") + euro(Math.abs(r.bespaard)) + "</span>" +
+        '<span class="logweg" data-tijd="' + r.tijd + '">\u00d7</span>' +
+        "</div>";
+    }
+    html += "</div>";
+    if (lijst.length > 25) {
+      html += '<p class="loguitleg">Alleen de laatste 25 beurten staan hier; ' +
+        "de teller bovenaan telt ze allemaal.</p>";
+    }
+  }
+
+  document.getElementById("loginhoud").innerHTML = html;
+}
+
+function wisBeurt(tijd) {
+  var lijst = logLezen();
+  for (var i = 0; i < lijst.length; i++) {
+    if (lijst[i].tijd === tijd) { lijst.splice(i, 1); break; }
+  }
+  logSchrijven(lijst);
+  toonLogboek();
+  tekenen();
 }
 
 function toonApparaten(nu) {
@@ -323,20 +573,38 @@ function toonApparaten(nu) {
     var a = gegevens.apparaten[i];
     var s = new Date(a.start), e = new Date(a.eind);
     var t = advies(a, nu);
-    html += '<div class="kaart ' + t.klasse + '">' +
+    /* Hebben we deze vandaag al afgevinkt? Dan neemt de bevestiging de plaats
+       van het advies in: dat is dan immers opgevolgd. */
+    var af = gedraaidVandaag(a.naam, nu);
+    var telbaar = teRegistreren(a);
+    html += '<div class="kaart ' + (af ? "gedaan" : t.klasse) +
+      (telbaar ? " tikbaar" : "") + '" data-i="' + i + '">' +
       '<div class="naam">' + a.emoji + " " + a.naam.toUpperCase() + "</div>" +
       '<div class="midden">' +
       (dagvoorvoegsel(s, nu) ? '<div class="wanneer">' +
         dagvoorvoegsel(s, nu).toUpperCase().replace(" ", "") + "</div>" : "") +
-      '<div class="venster">' + klokvan(s) + "–" + klokvan(e) + "</div></div>" +
-      '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' + t.doen + "</div>" +
-      '<div class="detail">' + t.detail + "</div>" +
-      '<div class="detail">' + euro(a.kosten) + " deze beurt</div>" +
-      (a.duurste_start
-        ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
-          " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
-        : "") +
-      "</div></div>";
+      '<div class="venster">' + klokvan(s) + "–" + klokvan(e) + "</div></div>";
+
+    if (af) {
+      html += '<div><div class="doen gedaanregel">✓ Gedraaid om ' +
+        klokvan(new Date(af.tijd)) + "</div>" +
+        '<div class="detail">' + besparingszin(af.bespaard) + "</div>" +
+        '<div class="detail tiphint">Nog eens tikken haalt hem weer weg.</div>' +
+        "</div></div>";
+    } else {
+      html += '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' +
+        t.doen + "</div>" +
+        (t.detail ? '<div class="detail">' + t.detail + "</div>" : "") +
+        '<div class="detail">' + euro(a.kosten) + " deze beurt</div>" +
+        (a.duurste_start
+          ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
+            " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
+          : "") +
+        (telbaar
+          ? '<div class="detail tiphint">Tik als je hem aanzet.</div>'
+          : "") +
+        "</div></div>";
+    }
   }
   houder.innerHTML = html;
 }
@@ -400,11 +668,9 @@ function tekenen() {
   document.body.className = (nu.getHours() >= 22 || nu.getHours() < 7) ? "nacht" : "";
   if (!gegevens) return;
 
-  var maanden = ["januari","februari","maart","april","mei","juni","juli",
-                 "augustus","september","oktober","november","december"];
   var d = new Date(gegevens.dag + "T12:00:00");
   document.getElementById("datum").textContent =
-    gegevens.dagnaam + " " + d.getDate() + " " + maanden[d.getMonth()];
+    gegevens.dagnaam + " " + d.getDate() + " " + MAANDEN[d.getMonth()];
 
   var prijs = huidigePrijs(nu);
   document.getElementById("nuprijs").textContent =
@@ -414,6 +680,7 @@ function tekenen() {
   toonApparaten(nu);
   toonGrafiek(nu);
   toonLive(nu);
+  toonLogknop();
 
   /* Data van gisteren is misleidend, dus dat zeggen we erbij. */
   /* Drie dingen kunnen misgaan, en die moeten uit elkaar te houden zijn:
@@ -642,7 +909,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-09e";        // staat in het uitlegvenster
+var VERSIE = "2026-09-11a";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -773,6 +1040,10 @@ function planApparaat(app, slots, nu, horizon) {
   var afronding = config.bericht.afronden_op_minuten;
   var uitstelMs = app.uitstel_max_uren * 3600000;
 
+  /* Twee sommen naast elkaar. De eerste weegt eigen zon mee en bepaalt welk
+     venster we aanwijzen; de tweede is kaal wat er aan de meter voorbijkomt,
+     en dat is het enige getal dat je op een rekening terugvindt. Alles wat we
+     in euro's tonen komt uit de tweede. */
   var kandidaten = [], alle = [];
   for (var i = 0; i + aantal <= slots.length; i++) {
     var start = slots[i].t;
@@ -782,12 +1053,13 @@ function planApparaat(app, slots, nu, horizon) {
     if (!magDraaien(app, start, eind)) continue;
 
     var gewicht = pvGewicht(start);
-    var kosten = 0;
+    var kosten = 0, echt = 0;
     for (var j = i; j < i + aantal; j++) {
       kosten += effectievePrijs(slots[j], app.piek_watt, basislast, gewicht) *
                 energiePerSlot;
+      echt += slots[j].p * energiePerSlot;
     }
-    alle.push([kosten, start]);
+    alle.push([kosten, start, echt]);
 
     /* Kun je er zelf bij? Binnen het bereik van de uitstelknop wel. Anders
        alleen als we op dat moment een seintje zouden mogen geven. */
@@ -801,7 +1073,7 @@ function planApparaat(app, slots, nu, horizon) {
       if (start.getHours() < WEKUREN[0] || start.getHours() >= WEKUREN[1]) continue;
       wekker = start;
     }
-    kandidaten.push([kosten, i, wekker]);
+    kandidaten.push([kosten, i, wekker, echt]);
   }
   if (!kandidaten.length) return null;
 
@@ -809,10 +1081,16 @@ function planApparaat(app, slots, nu, horizon) {
   for (var k = 1; k < kandidaten.length; k++) {
     if (kandidaten[k][0] < beste[0]) beste = kandidaten[k];
   }
-  var duurste = alle[0];
-  for (var m = 1; m < alle.length; m++) {
-    if (alle[m][0] > duurste[0]) duurste = alle[m];
+  /* Het duurste moment en het gemiddelde in echte euro's: het eerste staat op
+     de kaart, het tweede is waar het logboek de bespaarde beurten tegen
+     afzet. Een gemiddelde is daar de eerlijke maat — zo laat als het
+     duurste moment draai je in de praktijk toch niet. */
+  var duurste = alle[0], somEcht = 0;
+  for (var m = 0; m < alle.length; m++) {
+    if (alle[m][2] > duurste[2]) duurste = alle[m];
+    somEcht += alle[m][2];
   }
+  var gemiddeld = somEcht / alle.length;
 
   var index = beste[1];
   var zon = 0;
@@ -824,13 +1102,13 @@ function planApparaat(app, slots, nu, horizon) {
     start: slots[index].t.toISOString(),
     eind: new Date(slots[index].t.getTime() +
                    app.draaiduur_minuten * 60000).toISOString(),
-    kosten: Math.round(beste[0] * 100) / 100,
-    duurste_kosten: Math.round(duurste[0] * 100) / 100,
+    kosten: Math.round(beste[3] * 100) / 100,
+    duurste_kosten: Math.round(duurste[2] * 100) / 100,
     duurste_start: duurste[1].toISOString(),
+    gemiddelde_kosten: Math.round(gemiddeld * 1000) / 1000,
+    verbruik_kwh: app.verbruik_kwh,
     zon_deel: zon / (app.piek_watt * aantal),
-    duur_minuten: app.draaiduur_minuten,
-    uitstel_uren: app.uitstel_max_uren,
-    uitstel_type: app.uitstel_type || "start"
+    duur_minuten: app.draaiduur_minuten
   };
 }
 
@@ -955,6 +1233,34 @@ document.getElementById("uitlegknop").onclick = function () { toonUitleg(true); 
 document.getElementById("sluit").onclick = function () { toonUitleg(false); };
 /* Buiten het kader tikken sluit ook; dat verwacht iedereen. */
 sluier.onclick = function (e) { if (e.target === sluier) toonUitleg(false); };
+
+var logsluier = document.getElementById("logsluier");
+function toonLogvenster(aan) {
+  if (aan) toonLogboek();
+  logsluier.style.display = aan ? "block" : "none";
+}
+document.getElementById("logknop").onclick = function () { toonLogvenster(true); };
+document.getElementById("logsluit").onclick = function () { toonLogvenster(false); };
+logsluier.onclick = function (e) { if (e.target === logsluier) toonLogvenster(false); };
+document.getElementById("loginhoud").onclick = function (e) {
+  var tijd = e.target.getAttribute && e.target.getAttribute("data-tijd");
+  if (tijd) wisBeurt(tijd);
+};
+
+/* Tikken op een apparaat vinkt de beurt af. De kaarten worden elke tien
+   seconden opnieuw getekend, dus de afhandeling hangt aan de houder eromheen
+   en niet aan de kaarten zelf. */
+document.getElementById("apparaten").onclick = function (e) {
+  var el = e.target;
+  while (el && el !== this) {
+    var k = typeof el.className === "string" ? el.className : "";
+    if (k.indexOf("tikbaar") >= 0) {
+      registreer(parseInt(el.getAttribute("data-i"), 10));
+      return;
+    }
+    el = el.parentNode;
+  }
+};
 
 function vernieuwen() {
   if (token()) { bereken(); } else { ophalen(); }
