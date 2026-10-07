@@ -64,6 +64,8 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 /* Een afgevinkte beurt blijft staan maar treedt terug: het advies is op. */
 .kaart.gedaan { opacity: .5; }
 .kaart.tikbaar { cursor: pointer; }
+/* De andere keuze uit dezelfde groep is al gedraaid: deze kaart doet niet meer mee. */
+.kaart.uitgesloten { opacity: .35; }
 .gedaanregel { color: var(--nu); }
 .tiphint { font-style: italic; opacity: .7; }
 
@@ -281,6 +283,17 @@ body.nacht { filter: brightness(.42); }
       <p class="inleiding">De beurten die we op een gunstig moment hebben
         gedraaid, en wat dat scheelde.</p>
       <div id="loginhoud"></div>
+      <p class="loguitleg"><span class="logknop" id="meetknop"
+        style="padding:0">Meetdata tonen</span>
+        &nbsp;&middot;&nbsp;
+        <span class="logknop" id="meetdeel" style="padding:0">Delen via AirDrop</span></p>
+      <p class="loguitleg" id="meetmelding" style="display:none"></p>
+      <div id="meetblok" style="display:none">
+        <p class="loguitleg">Alles kopi\u00ebren (tik in het vak, dan
+          \u201cselecteer alles\u201d) en in het gesprek met Claude plakken.</p>
+        <textarea id="meetveld" readonly rows="8"
+          style="width:100%;font-size:13px"></textarea>
+      </div>
     </div>
   </div>
 
@@ -374,6 +387,20 @@ function gedraaidVandaag(naam, nu) {
   return null;
 }
 
+/* Is een ander apparaat uit dezelfde keuzegroep vandaag al afgevinkt? Wassen en
+   wassen + drogen zijn elkaars alternatief: draai je de ene, dan de andere niet. */
+function uitgeslotenDoor(index, nu) {
+  var a = gegevens.apparaten[index];
+  if (!a || !a.keuzegroep) return null;
+  for (var i = 0; i < gegevens.apparaten.length; i++) {
+    var b = gegevens.apparaten[i];
+    if (i !== index && b.keuzegroep === a.keuzegroep && gedraaidVandaag(b.naam, nu)) {
+      return b;
+    }
+  }
+  return null;
+}
+
 /* Zonder verbruik en zonder vergelijkingsmaatstaf valt er niets eerlijks te
    tellen. Dan is de kaart gewoon niet tikbaar, in plaats van dat we een getal
    verzinnen. Dat overkomt alleen wie de pagina zonder token opent op een
@@ -421,6 +448,7 @@ function registreer(index) {
   var nu = new Date();
   var lijst = logLezen();
   var af = gedraaidVandaag(a.naam, nu);
+  if (!af && uitgeslotenDoor(index, nu)) return;
   if (af) {
     for (var i = 0; i < lijst.length; i++) {
       if (lijst[i].naam === af.naam && lijst[i].dag === af.dag) {
@@ -429,6 +457,7 @@ function registreer(index) {
       }
     }
     logSchrijven(lijst);
+    meetGebeurtenis(a.naam, "weg");
     tekenen();
     return;
   }
@@ -449,6 +478,7 @@ function registreer(index) {
     bespaard: a.gemiddelde_kosten - kosten
   });
   logSchrijven(lijst);
+  meetGebeurtenis(a.naam, "aan");
   tekenen();
 }
 
@@ -553,7 +583,11 @@ function toonLogboek() {
 function wisBeurt(tijd) {
   var lijst = logLezen();
   for (var i = 0; i < lijst.length; i++) {
-    if (lijst[i].tijd === tijd) { lijst.splice(i, 1); break; }
+    if (lijst[i].tijd === tijd) {
+      meetGebeurtenis(lijst[i].naam, "weg");
+      lijst.splice(i, 1);
+      break;
+    }
   }
   logSchrijven(lijst);
   toonLogboek();
@@ -580,8 +614,9 @@ function toonApparaten(nu) {
     /* Hebben we deze vandaag al afgevinkt? Dan neemt de bevestiging de plaats
        van het advies in: dat is dan immers opgevolgd. */
     var af = gedraaidVandaag(a.naam, nu);
-    var telbaar = teRegistreren(a);
-    html += '<div class="kaart ' + (af ? "gedaan" : t.klasse) +
+    var uitDoor = af ? null : uitgeslotenDoor(i, nu);
+    var telbaar = teRegistreren(a) && !uitDoor;
+    html += '<div class="kaart ' + (af ? "gedaan" : uitDoor ? "uitgesloten" : t.klasse) +
       (telbaar ? " tikbaar" : "") + '" data-i="' + i + '">' +
       '<div class="naam">' + a.emoji + " " + a.naam.toUpperCase() + "</div>" +
       '<div class="midden">' +
@@ -595,6 +630,12 @@ function toonApparaten(nu) {
         klokvan(new Date(af.tijd)) + "</div>" +
         '<div class="detail">' + besparingszin(af.bespaard) + "</div>" +
         '<div class="detail tiphint">Nog eens tikken haalt hem weer weg.</div>' +
+        "</div></div>";
+    } else if (uitDoor) {
+      html += '<div><div class="doen">Niet nodig</div>' +
+        '<div class="detail">Je hebt al gekozen voor ' + uitDoor.naam.toLowerCase() +
+        ".</div>" +
+        '<div class="detail tiphint">Haal die eerst weg om hierop te wisselen.</div>' +
         "</div></div>";
     } else {
       html += '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' +
@@ -749,6 +790,105 @@ function token() {
   }
 })();
 
+/* ---- Meetopname: welk vermogen hoort bij welk apparaat ------------------
+   Het scherm schrijft stilletjes het netto vermogen weg in blokjes van dertig
+   seconden, per dag een rij getallen (afgerond op 10 W). Samen met de
+   momenten waarop je een apparaat aantikt is dat genoeg om later te zien of de
+   vaatwasser, de was en was + droog uit elkaar te halen zijn. Netto, dus
+   verbruik min teruglevering: een zonnige dag maskeert een machine. */
+
+var MEETSLOT = 30;
+var MEETSLEUTEL = "stroomtip_meting_";
+var MEETBEWAARD_DAGEN = 21;
+var meetDag = null, meetReeks = [], meetBak = null, meetVuil = false;
+
+function meetSlot(nu) {
+  return Math.floor((nu.getHours() * 3600 + nu.getMinutes() * 60 +
+                     nu.getSeconds()) / MEETSLOT);
+}
+
+function meetBewaar() {
+  if (!meetDag || !meetVuil) return;
+  try {
+    localStorage.setItem(MEETSLEUTEL + "dag_" + meetDag, meetReeks.join(","));
+    meetVuil = false;
+  } catch (e) {}
+}
+
+function meetOpruimen(nu) {
+  try {
+    var grens = new Date(nu.getTime() - MEETBEWAARD_DAGEN * 86400000);
+    var weg = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(MEETSLEUTEL + "dag_") === 0 &&
+          k.slice(MEETSLEUTEL.length + 4) < dagsleutel(grens)) weg.push(k);
+    }
+    for (var j = 0; j < weg.length; j++) localStorage.removeItem(weg[j]);
+  } catch (e) {}
+}
+
+function meetNoteer(nu, netto) {
+  var dag = dagsleutel(nu), slot = meetSlot(nu);
+  if (dag !== meetDag) {
+    meetBewaar();
+    meetDag = dag; meetBak = null; meetReeks = [];
+    try {
+      var rauw = localStorage.getItem(MEETSLEUTEL + "dag_" + dag);
+      if (rauw) {
+        var delen = rauw.split(",");
+        for (var i = 0; i < delen.length; i++) {
+          meetReeks[i] = delen[i] === "" ? undefined : parseInt(delen[i], 10);
+        }
+      }
+    } catch (e) {}
+    meetOpruimen(nu);
+  }
+  if (meetBak && meetBak.slot !== slot) {
+    meetReeks[meetBak.slot] = Math.round(meetBak.som / meetBak.n / 10) * 10;
+    meetVuil = true;
+    meetBak = null;
+  }
+  if (!meetBak) meetBak = { slot: slot, som: 0, n: 0 };
+  meetBak.som += netto;
+  meetBak.n++;
+}
+
+/* Wat je op het scherm aantikt of weghaalt is de enige waarheid waar we de
+   vermogenspatronen straks aan hangen, dus dat bewaren we los van het
+   logboek: een weggehaalde misklik blijft hier zichtbaar. */
+function meetGebeurtenis(naam, actie) {
+  try {
+    var lijst = JSON.parse(localStorage.getItem(MEETSLEUTEL + "tikken") || "[]");
+    lijst.push({ t: new Date().toISOString(), naam: naam, actie: actie });
+    localStorage.setItem(MEETSLEUTEL + "tikken", JSON.stringify(lijst));
+  } catch (e) {}
+}
+
+function meetExport() {
+  meetBewaar();
+  var uit = "# stroomtip-meting v1\n" +
+    "# per dag: tot 2880 waarden, elk een blok van 30 s vanaf 00:00 (lokale tijd)\n" +
+    "# waarde = netto watt (verbruik min teruglevering), op 10 W afgerond; leeg = geen meting\n";
+  try {
+    uit += "# tikken\n" + (localStorage.getItem(MEETSLEUTEL + "tikken") || "[]") + "\n";
+    var sleutels = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (k && k.indexOf(MEETSLEUTEL + "dag_") === 0) sleutels.push(k);
+    }
+    sleutels.sort();
+    for (var j = 0; j < sleutels.length; j++) {
+      uit += "# dag " + sleutels[j].slice(MEETSLEUTEL.length + 4) + "\n" +
+             localStorage.getItem(sleutels[j]) + "\n";
+    }
+  } catch (e) {}
+  return uit;
+}
+
+setInterval(meetBewaar, 300000);
+window.addEventListener("pagehide", meetBewaar);
+
 function toonLive(nu) {
   var houder = document.getElementById("live");
   if (!token() || tokenOngeldig) {
@@ -863,6 +1003,9 @@ function verbind() {
     } else if (m.type === "next" && m.payload && m.payload.data) {
       meting = m.payload.data.liveMeasurement;
       metingOm = Date.now();
+      if (meting && typeof meting.power === "number") {
+        meetNoteer(new Date(), meting.power - (meting.powerProduction || 0));
+      }
       toonLive(new Date());
     }
   };
@@ -914,7 +1057,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-09-11c";        // staat in het uitlegvenster
+var VERSIE = "2026-10-07c";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -1103,7 +1246,7 @@ function planApparaat(app, slots, nu, horizon) {
     zon += Math.min(app.piek_watt, Math.max(0, slots[n].z - basislast));
   }
   return {
-    naam: app.naam, emoji: app.emoji,
+    naam: app.naam, emoji: app.emoji, keuzegroep: app.keuzegroep || "",
     start: slots[index].t.toISOString(),
     eind: new Date(slots[index].t.getTime() +
                    app.draaiduur_minuten * 60000).toISOString(),
@@ -1245,6 +1388,40 @@ function toonLogvenster(aan) {
   logsluier.style.display = aan ? "block" : "none";
 }
 document.getElementById("logknop").onclick = function () { toonLogvenster(true); };
+document.getElementById("meetknop").onclick = function () {
+  var blok = document.getElementById("meetblok");
+  var veld = document.getElementById("meetveld");
+  var aan = blok.style.display === "none";
+  if (aan) veld.value = meetExport();
+  blok.style.display = aan ? "block" : "none";
+  this.textContent = aan ? "Meetdata verbergen" : "Meetdata tonen";
+};
+/* Het deelmenu van de iPad (waar AirDrop in zit) als dat bestanden kan delen;
+   anders een gewone download, die in Bestanden terechtkomt en vandaar alsnog
+   gedeeld kan worden. */
+document.getElementById("meetdeel").onclick = function () {
+  var melding = document.getElementById("meetmelding");
+  var tekst = meetExport();
+  var naam = "stroomtip-meting-" + dagsleutel(new Date()) + ".txt";
+  function zeg(t) { melding.textContent = t; melding.style.display = "block"; }
+  try {
+    var bestand = new File([tekst], naam, { type: "text/plain" });
+    if (navigator.canShare && navigator.canShare({ files: [bestand] })) {
+      navigator.share({ files: [bestand], title: naam }).catch(function () {});
+      return;
+    }
+  } catch (e) {}
+  try {
+    var url = URL.createObjectURL(new Blob([tekst], { type: "text/plain" }));
+    var link = document.createElement("a");
+    link.href = url; link.download = naam;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    zeg("Bewaard als " + naam + ". Open Bestanden op de iPad, tik het bestand " +
+        "lang aan en kies Deel, dan AirDrop.");
+  } catch (e) {
+    zeg("Delen lukt op deze iPad niet. Gebruik Meetdata tonen en kopieer de tekst.");
+  }
+};
 document.getElementById("logsluit").onclick = function () { toonLogvenster(false); };
 logsluier.onclick = function (e) { if (e.target === logsluier) toonLogvenster(false); };
 document.getElementById("loginhoud").onclick = function (e) {
