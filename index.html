@@ -1026,6 +1026,29 @@ function verbind() {
   socket.onerror = function () { if (socket) socket.close(); };
 }
 
+/* Een data.json van voor de keuzegroepen kent ze niet. Dan halen we ze uit
+   config.json, anders blijft de tweede wasoptie gewoon tikbaar. */
+function keuzegroepenAanvullen() {
+  if (!gegevens || !gegevens.apparaten) return;
+  var mist = false;
+  for (var i = 0; i < gegevens.apparaten.length; i++) {
+    if (gegevens.apparaten[i].keuzegroep === undefined) mist = true;
+  }
+  if (!mist) return;
+  fetch("config.json?t=" + Date.now()).then(function (a) { return a.json(); })
+    .then(function (c) {
+      var lijst = c.apparaat || [];
+      for (var i = 0; i < gegevens.apparaten.length; i++) {
+        var a = gegevens.apparaten[i];
+        for (var j = 0; j < lijst.length; j++) {
+          if (lijst[j].naam === a.naam) a.keuzegroep = lijst[j].keuzegroep || "";
+        }
+        if (a.keuzegroep === undefined) a.keuzegroep = "";
+      }
+      tekenen();
+    }).catch(function () {});
+}
+
 function ophalen() {
   var verzoek = new XMLHttpRequest();
   verzoek.open("GET", BRON + "?t=" + Date.now(), true);
@@ -1038,6 +1061,7 @@ function ophalen() {
       } catch (e) {}
     }
     tekenen();
+    keuzegroepenAanvullen();
   };
   /* Bij netwerkproblemen blijft het laatst bekende plan staan: een oud advies
      is nuttiger dan een leeg scherm aan de muur. */
