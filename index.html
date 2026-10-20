@@ -65,7 +65,7 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .kaart.gedaan { opacity: .5; }
 .kaart.tikbaar { cursor: pointer; }
 /* De andere keuze uit dezelfde groep is al gedraaid: deze kaart doet niet meer mee. */
-.kaart.uitgesloten { opacity: .35; }
+.kaart.uitgesloten { opacity: .4; -webkit-filter: grayscale(1) blur(1.5px); filter: grayscale(1) blur(1.5px); pointer-events: none; }
 .gedaanregel { color: var(--nu); }
 .tiphint { font-style: italic; opacity: .7; }
 
