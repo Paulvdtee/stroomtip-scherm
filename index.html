@@ -48,7 +48,7 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
   -webkit-box-flex: 1; flex: 1 1 0; min-width: 0;
   background: var(--kaart); border: 2px solid var(--rand); border-radius: 18px;
   padding: 20px 26px 22px; display: flex; flex-direction: column;
-  margin-right: 18px;
+  margin-right: 18px; position: relative; z-index: 0;
   transition: background-color .4s, border-color .4s;
 }
 .midden { -webkit-box-flex: 1; flex: 1 1 auto; display: flex;
@@ -65,7 +65,31 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 .kaart.gedaan { opacity: .5; }
 .kaart.tikbaar { cursor: pointer; }
 /* De andere keuze uit dezelfde groep is al gedraaid: deze kaart doet niet meer mee. */
-.kaart.uitgesloten { opacity: .4; -webkit-filter: grayscale(1) blur(1.5px); filter: grayscale(1) blur(1.5px); pointer-events: none; }
+/* De illustratie ligt onder de tekst; een donkere sluier maakt de onderste helft
+   rustig, zodat de tijden en het advies leesbaar blijven. */
+.plaat { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: -1;
+         border-radius: 16px; overflow: hidden; background-size: cover;
+         background-position: center top; background-repeat: no-repeat; }
+.plaat::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  background: -webkit-linear-gradient(top, rgba(26,33,43,0) 0, rgba(26,33,43,0) 30%, rgba(26,33,43,.93) 62%, rgba(26,33,43,.97) 100%);
+  background: linear-gradient(to bottom, rgba(26,33,43,0) 0, rgba(26,33,43,0) 30%, rgba(26,33,43,.93) 62%, rgba(26,33,43,.97) 100%); }
+.kaart.actief .plaat::after {
+  background: -webkit-linear-gradient(top, rgba(20,67,42,0) 0, rgba(20,67,42,0) 30%, rgba(20,67,42,.93) 62%, rgba(20,67,42,.97) 100%);
+  background: linear-gradient(to bottom, rgba(20,67,42,0) 0, rgba(20,67,42,0) 30%, rgba(20,67,42,.93) 62%, rgba(20,67,42,.97) 100%); }
+/* Met een illustratie zakt de tekst naar beneden, onder het plaatje. */
+.kaart.metplaat .midden { justify-content: flex-end; }
+.kaart.metplaat .naam, .kaart.metplaat.actief .naam { color: var(--tekst);
+  text-shadow: 0 1px 3px rgba(0,0,0,.8), 0 0 10px rgba(0,0,0,.6); }
+.kaart.uitgesloten { pointer-events: none; }
+.kaart.uitgesloten .plaat { opacity: .4; -webkit-filter: grayscale(1) blur(1.5px); filter: grayscale(1) blur(1.5px); }
+/* Alleen de inhoud wordt grijs en vaag; de melding ligt er scherp bovenop. */
+.kaart.uitgesloten .vervaagd { display: flex; flex-direction: column; -webkit-box-flex: 1; flex: 1 1 auto;
+  opacity: .4; -webkit-filter: grayscale(1) blur(1.5px); filter: grayscale(1) blur(1.5px); }
+.kaart.uitgesloten .midden { visibility: hidden; }
+.uitgesloten .melding { position: absolute; top: 0; right: 0; bottom: 0; left: 0;
+  display: flex; -webkit-box-align: center; align-items: center; -webkit-box-pack: center; justify-content: center;
+  padding: 0 28px; text-align: center; font-size: 29px; font-weight: 600; line-height: 1.25;
+  color: var(--tekst); text-shadow: 0 0 10px var(--kaart), 0 0 4px var(--kaart); }
 .gedaanregel { color: var(--nu); }
 .tiphint { font-style: italic; opacity: .7; }
 
@@ -307,6 +331,13 @@ body.nacht { filter: brightness(.42); }
 "use strict";
 
 var BRON = "data.json";
+/* Welke illustratie bij welk apparaat hoort. Een apparaat zonder plaatje krijgt
+   gewoon de effen kaart. */
+var AFBEELDINGEN = {
+  "Vaatwasser": "afbeeldingen/vaatwasser.jpg",
+  "Wassen": "afbeeldingen/wassen.jpg",
+  "Wassen + drogen": "afbeeldingen/wassen-drogen.jpg"
+};
 var gegevens = null;
 
 function tweecijfers(n) { return (n < 10 ? "0" : "") + n; }
@@ -617,7 +648,11 @@ function toonApparaten(nu) {
     var uitDoor = af ? null : uitgeslotenDoor(i, nu);
     var telbaar = teRegistreren(a) && !uitDoor;
     html += '<div class="kaart ' + (af ? "gedaan" : uitDoor ? "uitgesloten" : t.klasse) +
-      (telbaar ? " tikbaar" : "") + '" data-i="' + i + '">' +
+      (telbaar ? " tikbaar" : "") + (AFBEELDINGEN[a.naam] ? " metplaat" : "") +
+      '" data-i="' + i + '">' +
+      (AFBEELDINGEN[a.naam] ? '<div class="plaat" style="background-image:url(' +
+        AFBEELDINGEN[a.naam] + ')"></div>' : "") +
+      (uitDoor ? '<div class="vervaagd">' : "") +
       '<div class="naam">' + a.emoji + " " + a.naam.toUpperCase() + "</div>" +
       '<div class="midden">' +
       (dagvoorvoegsel(s, nu) ? '<div class="wanneer">' +
@@ -632,11 +667,7 @@ function toonApparaten(nu) {
         '<div class="detail tiphint">Nog eens tikken haalt hem weer weg.</div>' +
         "</div></div>";
     } else if (uitDoor) {
-      html += '<div><div class="doen">Niet nodig</div>' +
-        '<div class="detail">Je hebt al gekozen voor ' + uitDoor.naam.toLowerCase() +
-        ".</div>" +
-        '<div class="detail tiphint">Haal die eerst weg om hierop te wisselen.</div>' +
-        "</div></div>";
+      html += '</div><div class="melding">Je hebt al een was gedraaid vandaag</div></div>';
     } else {
       html += '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' +
         t.doen + "</div>" +
