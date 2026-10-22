@@ -94,7 +94,6 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
   padding: 0 28px; text-align: center; font-size: 29px; font-weight: 600; line-height: 1.25;
   color: var(--tekst); text-shadow: 0 0 10px var(--kaart), 0 0 4px var(--kaart); }
 .gedaanregel { color: var(--nu); }
-.tiphint { font-style: italic; opacity: .7; }
 
 .naam { font-size: 27px; font-weight: 600; color: var(--gedempt);
         letter-spacing: .02em; }
@@ -413,26 +412,59 @@ function dagsleutel(d) {
          tweecijfers(d.getDate());
 }
 
-function gedraaidVandaag(naam, nu) {
-  var lijst = logLezen(), dag = dagsleutel(nu);
+function beurtOpDag(naam, dag) {
+  var lijst = logLezen();
   for (var i = 0; i < lijst.length; i++) {
     if (lijst[i].naam === naam && lijst[i].dag === dag) return lijst[i];
   }
   return null;
 }
 
-/* Is een ander apparaat uit dezelfde keuzegroep vandaag al afgevinkt? Wassen en
-   wassen + drogen zijn elkaars alternatief: draai je de ene, dan de andere niet. */
+/* Op welke dag speelt het tijdvak op deze kaart? Staat het nog te komen, dan op
+   de dag van dat tijdvak (dat kan morgen zijn), anders is het vandaag. */
+function kaartdag(a, nu) {
+  var start = new Date(a.start);
+  return dagsleutel(start > nu ? start : nu);
+}
+
+/* De beurt die bij deze kaart hoort. Een tijdvak dat je hebt vastgelegd en dat
+   nog loopt of nog komt gaat voor: het advies op de kaart kan intussen
+   verschoven zijn, maar jouw keuze ligt vast. Anders zoeken we de beurt van de
+   dag waarop de kaart speelt. */
+function beurtVoorKaart(a, nu) {
+  var lijst = logLezen(), dag = kaartdag(a, nu), gevonden = null;
+  for (var i = 0; i < lijst.length; i++) {
+    var r = lijst[i];
+    if (r.naam !== a.naam) continue;
+    if (r.ingepland && new Date(r.eind) > nu) return r;
+    if (r.dag === dag) gevonden = r;
+  }
+  return gevonden;
+}
+
+/* Heeft een ander apparaat uit dezelfde keuzegroep al een beurt op de dag van
+   deze kaart? Wassen en wassen + drogen zijn elkaars alternatief: kies je de
+   ene, dan de andere niet. Geeft die beurt terug, of null. */
 function uitgeslotenDoor(index, nu) {
   var a = gegevens.apparaten[index];
   if (!a || !a.keuzegroep) return null;
+  var dag = kaartdag(a, nu);
   for (var i = 0; i < gegevens.apparaten.length; i++) {
     var b = gegevens.apparaten[i];
-    if (i !== index && b.keuzegroep === a.keuzegroep && gedraaidVandaag(b.naam, nu)) {
-      return b;
-    }
+    if (i === index || b.keuzegroep !== a.keuzegroep) continue;
+    var r = beurtOpDag(b.naam, dag);
+    if (r) return r;
   }
   return null;
+}
+
+/* De melding op een kaart die niet meedoet, omdat de andere keuze al vastligt. */
+function uitsluitzin(beurt, nu) {
+  if (!(beurt.ingepland && new Date(beurt.start) > nu)) {
+    return "Je hebt al een was gedraaid vandaag";
+  }
+  var dag = dagvoorvoegsel(new Date(beurt.start), nu).replace(/\s+$/, "");
+  return "Je hebt al een was ingepland " + (dag ? "voor " + dag : "vandaag");
 }
 
 /* Zonder verbruik en zonder vergelijkingsmaatstaf valt er niets eerlijks te
@@ -474,18 +506,23 @@ function besparingszin(bespaard) {
 }
 
 /* Een tik registreert de beurt; nog een tik neemt hem terug. Aan de muur is
-   een misklik zo gezet, en die moet je kunnen herstellen. */
+   een misklik zo gezet, en die moet je kunnen herstellen.
+
+   Ligt het tijdvak op de kaart nog in het verschiet, dan leg je dat tijdvak vast
+   (bijvoorbeeld de uitgestelde start van de vaatwasser), tegen de kosten van
+   dat tijdvak. Is het blok al begonnen of voorbij, dan tellen de kosten van het
+   moment van tikken. */
 function registreer(index) {
   if (!gegevens || !gegevens.apparaten) return;
   var a = gegevens.apparaten[index];
   if (!teRegistreren(a)) return;
   var nu = new Date();
   var lijst = logLezen();
-  var af = gedraaidVandaag(a.naam, nu);
+  var af = beurtVoorKaart(a, nu);
   if (!af && uitgeslotenDoor(index, nu)) return;
   if (af) {
     for (var i = 0; i < lijst.length; i++) {
-      if (lijst[i].naam === af.naam && lijst[i].dag === af.dag) {
+      if (lijst[i].naam === af.naam && lijst[i].tijd === af.tijd) {
         lijst.splice(i, 1);
         break;
       }
@@ -495,22 +532,39 @@ function registreer(index) {
     tekenen();
     return;
   }
-  /* Wat hij nu kost, niet wat het geplande venster kostte: je kunt ook
-     buiten het venster op de kaart tikken, en dan hoort daar het eerlijke
-     bedrag bij. Lukt dat niet, dan valt het terug op het venster zelf. */
-  var kosten = kostenVanaf(nu, a.duur_minuten, a.verbruik_kwh);
-  if (kosten === null) kosten = a.kosten;
+  var start = new Date(a.start);
+  var ingepland = start > nu;
+  var kosten, tijd;
+  if (ingepland) {
+    kosten = a.kosten;
+    tijd = start;
+  } else {
+    /* Wat hij nu kost, niet wat het geplande venster kostte: je kunt ook
+       buiten het venster op de kaart tikken, en dan hoort daar het eerlijke
+       bedrag bij. Lukt dat niet, dan valt het terug op het venster zelf. */
+    kosten = kostenVanaf(nu, a.duur_minuten, a.verbruik_kwh);
+    if (kosten === null) kosten = a.kosten;
+    tijd = nu;
+  }
   if (typeof kosten !== "number") return;
-  lijst.push({
-    dag: dagsleutel(nu),
-    tijd: nu.toISOString(),
+  var beurt = {
+    dag: dagsleutel(tijd),
+    tijd: tijd.toISOString(),
     naam: a.naam,
     emoji: a.emoji || "",
     kwh: a.verbruik_kwh,
     kosten: kosten,
     referentie: a.gemiddelde_kosten,
     bespaard: a.gemiddelde_kosten - kosten
-  });
+  };
+  /* Het tijdvak ligt vast op het moment van tikken, ook als het advies later
+     verschuift. */
+  if (ingepland) {
+    beurt.ingepland = true;
+    beurt.start = a.start;
+    beurt.eind = a.eind;
+  }
+  lijst.push(beurt);
   logSchrijven(lijst);
   meetGebeurtenis(a.naam, "aan");
   tekenen();
@@ -587,7 +641,7 @@ function toonLogboek() {
 
   if (!lijst.length) {
     html += '<p class="loguitleg">Tik op het scherm op de vaatwasser of de was ' +
-      "op het moment dat je hem aanzet. Dan noteren we wat die beurt kost en " +
+      "zodra je het advies volgt, ook als je hem uitgesteld laat starten. Dan noteren we wat die beurt kost en " +
       "wat hij gemiddeld gekost zou hebben, en groeit deze teller vanzelf.</p>";
   } else {
     html += '<div class="logtabel">';
@@ -647,8 +701,11 @@ function toonApparaten(nu) {
     var t = advies(a, nu);
     /* Hebben we deze vandaag al afgevinkt? Dan neemt de bevestiging de plaats
        van het advies in: dat is dan immers opgevolgd. */
-    var af = gedraaidVandaag(a.naam, nu);
+    var af = beurtVoorKaart(a, nu);
     var uitDoor = af ? null : uitgeslotenDoor(i, nu);
+    /* Een vastgelegd tijdvak blijft zoals je het koos, ook als het advies
+       intussen is verschoven. */
+    if (af && af.ingepland) { s = new Date(af.start); e = new Date(af.eind); }
     var telbaar = teRegistreren(a) && !uitDoor;
     html += '<div class="kaart ' + (af ? "gedaan" : uitDoor ? "uitgesloten" : t.klasse) +
       (telbaar ? " tikbaar" : "") + (AFBEELDINGEN[a.naam] ? " metplaat" : "") +
@@ -664,13 +721,14 @@ function toonApparaten(nu) {
       '<span class="streep">–</span>' + klokvan(e) + "</div></div>";
 
     if (af) {
-      html += '<div><div class="doen gedaanregel">✓ Gedraaid om ' +
-        klokvan(new Date(af.tijd)) + "</div>" +
+      html += '<div><div class="doen gedaanregel">' +
+        (af.ingepland
+          ? (new Date(af.start) > nu ? "✓ Ingepland" : "✓ Gedraaid")
+          : "✓ Gedraaid om " + klokvan(new Date(af.tijd))) + "</div>" +
         '<div class="detail">' + besparingszin(af.bespaard) + "</div>" +
-        '<div class="detail tiphint">Nog eens tikken haalt hem weer weg.</div>' +
         "</div></div>";
     } else if (uitDoor) {
-      html += '</div><div class="melding">Je hebt al een was gedraaid vandaag</div></div>';
+      html += '</div><div class="melding">' + uitsluitzin(uitDoor, nu) + "</div></div>";
     } else {
       html += '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' +
         t.doen + "</div>" +
@@ -679,9 +737,6 @@ function toonApparaten(nu) {
         (a.duurste_start
           ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
             " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
-          : "") +
-        (telbaar
-          ? '<div class="detail tiphint">Tik als je hem aanzet.</div>'
           : "") +
         "</div></div>";
     }
