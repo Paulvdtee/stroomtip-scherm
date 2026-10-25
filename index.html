@@ -135,16 +135,37 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
 /* Prijsverloop van de dag */
 .grafiek { height: 100px; min-height: 100px; margin-top: 18px;
            position: relative; }
-.balken { position: absolute; left: 0; right: 0; bottom: 20px; top: 0;
+.balken { position: absolute; left: 50px; right: 0; bottom: 20px; top: 0;
           display: -webkit-box; display: flex; -webkit-box-align: end;
           align-items: flex-end; }
 .balk { -webkit-box-flex: 1; flex: 1 1 0; margin-right: 1px;
         background: #2f3b4a; border-radius: 2px 2px 0 0; min-height: 2px; }
 .balk.venster { background: #3f7d5a; }
 .balk.nu { background: var(--tekst); }
-.uren { position: absolute; left: 0; right: 0; bottom: 0; height: 18px;
+.uren { position: absolute; left: 50px; right: 0; bottom: 0; height: 18px;
         color: var(--gedempt); font-size: 15px; }
 .uur { position: absolute; transform: translateX(-50%); }
+/* De y-as: prijzen links, met hulplijnen over de balken. De balken beginnen niet
+   bij nul maar bij het goedkoopste kwartier, dus de waarden staan erbij. */
+.as { position: absolute; left: 0; right: 0; bottom: 20px; top: 0;
+      pointer-events: none; }
+.asrij { position: absolute; left: 50px; right: 0; height: 0;
+         border-top: 1px dashed rgba(139,152,168,.28); }
+.aswaarde { position: absolute; left: 0; width: 44px; text-align: right;
+            -webkit-transform: translateY(50%); transform: translateY(50%);
+            font-size: 13px; color: var(--gedempt);
+            font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* De programmaknoppen op de vaatwasserkaart: wat je echt hebt gedaan. */
+.programmas { display: -webkit-box; display: flex; flex-wrap: wrap;
+              margin-top: 10px; }
+.pknop { width: 49%; margin-bottom: 8px; padding: 6px 4px 7px;
+         text-align: center; border: 2px solid var(--rand); border-radius: 12px;
+         background: rgba(26,33,43,.9); cursor: pointer; line-height: 1.15; }
+.pknop:nth-child(odd) { margin-right: 2%; }
+.pknop:active { background: var(--nu-dof); border-color: var(--nu); }
+.pknop .pnaam { font-size: 18px; font-weight: 700; }
+.pknop .puitstel { font-size: 14px; color: var(--gedempt); margin-top: 1px; }
 
 .voet { display: flex; justify-content: space-between; align-items: baseline;
         margin-top: 6px; font-size: 18px; color: var(--gedempt); }
@@ -238,6 +259,7 @@ body.nacht { filter: brightness(.42); }
 
   <div class="grafiek">
     <div class="balken" id="balken"></div>
+    <div class="as" id="as"></div>
     <div class="uren" id="uren"></div>
   </div>
 
@@ -252,7 +274,9 @@ body.nacht { filter: brightness(.42); }
         <h3>De stroomprijs verandert de hele dag</h3>
         <p>We betalen per kwartier de actuele beursprijs. Draaien op het goede
           moment scheelt al snel <b>de helft</b> ten opzichte van de avondspits,
-          voor precies dezelfde was.</p>
+          voor precies dezelfde was. De kaarten tonen het beste moment van
+          <b>vandaag</b>; onderin zie je de komende 24 uur, dus ook of morgen
+          goedkoper wordt.</p>
       </div></div>
 
       <div class="punt"><div class="teken">🕐</div><div>
@@ -266,7 +290,9 @@ body.nacht { filter: brightness(.42); }
       <div class="punt"><div class="teken">✓</div><div>
         <h3>Tik erop als je hem aanzet</h3>
         <p>Dan onthoudt het scherm die beurt en telt het op wat hij scheelde
-          ten opzichte van een doorsnee moment. Onderin staat de stand;
+          ten opzichte van een doorsnee moment. Bij de vaatwasser kies je
+          het programma en of je hem nu of met uitstel start, want dat is niet
+          altijd het geadviseerde tijdvak. Onderin staat de stand;
           <b>tik daarop</b> voor het hele overzicht. Vergist? Nog een keer
           tikken haalt hem weer weg.</p>
       </div></div>
@@ -436,7 +462,7 @@ function beurtVoorKaart(a, nu) {
   for (var i = 0; i < lijst.length; i++) {
     var r = lijst[i];
     if (r.naam !== a.naam) continue;
-    if (r.ingepland && new Date(r.eind) > nu) return r;
+    if ((r.ingepland || r.programma) && new Date(r.eind) > nu) return r;
     if (r.dag === dag) gevonden = r;
   }
   return gevonden;
@@ -570,6 +596,40 @@ function registreer(index) {
   tekenen();
 }
 
+/* Een tik op een programmaknop: de beurt zoals je hem werkelijk zet, dus vanaf
+   nu of vanaf over zoveel uur, met de duur en het verbruik van dat programma.
+   Hij hoeft dus niet in het geadviseerde tijdvak te vallen. */
+function registreerProgramma(index, pi, uitstelUren) {
+  if (!gegevens || !gegevens.apparaten) return;
+  var a = gegevens.apparaten[index];
+  var prog = a && a.programmas ? a.programmas[pi] : null;
+  if (!prog || typeof prog.gemiddelde_kosten !== "number") return;
+  var nu = new Date();
+  if (beurtVoorKaart(a, nu) || uitgeslotenDoor(index, nu)) return;
+  var start = new Date(nu.getTime() + uitstelUren * 3600000);
+  var kosten = kostenVanaf(start, prog.duur_minuten, prog.verbruik_kwh);
+  if (kosten === null) return;
+  var beurt = {
+    dag: dagsleutel(start),
+    tijd: start.toISOString(),
+    naam: a.naam,
+    emoji: a.emoji || "",
+    programma: prog.naam,
+    kwh: prog.verbruik_kwh,
+    kosten: kosten,
+    referentie: prog.gemiddelde_kosten,
+    bespaard: prog.gemiddelde_kosten - kosten,
+    start: start.toISOString(),
+    eind: new Date(start.getTime() + prog.duur_minuten * 60000).toISOString()
+  };
+  if (uitstelUren > 0) beurt.ingepland = true;
+  var lijst = logLezen();
+  lijst.push(beurt);
+  logSchrijven(lijst);
+  meetGebeurtenis(a.naam, "aan");
+  tekenen();
+}
+
 function logTotaal(vanaf) {
   var lijst = logLezen(), som = 0, aantal = 0, eerste = null;
   for (var i = 0; i < lijst.length; i++) {
@@ -640,8 +700,8 @@ function toonLogboek() {
     "er gewoon vanaf.</p>";
 
   if (!lijst.length) {
-    html += '<p class="loguitleg">Tik op het scherm op de vaatwasser of de was ' +
-      "zodra je het advies volgt, ook als je hem uitgesteld laat starten. Dan noteren we wat die beurt kost en " +
+    html += '<p class="loguitleg">Tik op het scherm op de was, of kies bij de ' +
+      "vaatwasser je programma, zodra je hem aanzet, ook als je hem uitgesteld laat starten. Dan noteren we wat die beurt kost en " +
       "wat hij gemiddeld gekost zou hebben, en groeit deze teller vanzelf.</p>";
   } else {
     html += '<div class="logtabel">';
@@ -651,7 +711,7 @@ function toonLogboek() {
         '<span class="logdag">' + d.getDate() + " " +
         MAANDEN[d.getMonth()].slice(0, 3) + " " + klokvan(d) + "</span>" +
         '<span class="lognaam">' + (r.emoji ? r.emoji + " " : "") + r.naam +
-        "</span>" +
+        (r.programma ? " \u00b7 " + r.programma : "") + "</span>" +
         '<span class="logkosten">' + euro(r.kosten) + " betaald</span>" +
         '<span class="logwinst' + (r.bespaard < 0 ? " verlies" : "") + '">' +
         (r.bespaard < 0 ? "\u2212" : "+") + euro(Math.abs(r.bespaard)) + "</span>" +
@@ -682,6 +742,23 @@ function wisBeurt(tijd) {
   tekenen();
 }
 
+/* Per programma een knop zonder uitstel en een met. Met de uitstelknop startte
+   je hem straks vanzelf, dus die beurt telt vanaf dan. */
+function knoppenHtml(index, a) {
+  var html = '<div class="programmas">';
+  for (var p = 0; p < a.programmas.length; p++) {
+    var uren = [0, a.uitstel_uren || 0];
+    for (var u = 0; u < uren.length; u++) {
+      if (u === 1 && !uren[1]) continue;
+      html += '<div class="pknop" data-i="' + index + '" data-p="' + p +
+        '" data-u="' + uren[u] + '"><div class="pnaam">' +
+        a.programmas[p].naam + '</div><div class="puitstel">' +
+        (uren[u] ? "over " + uren[u] + " uur" : "nu") + "</div></div>";
+    }
+  }
+  return html + "</div>";
+}
+
 function toonApparaten(nu) {
   var houder = document.getElementById("apparaten");
   houder.className = "apparaten" +
@@ -705,8 +782,13 @@ function toonApparaten(nu) {
     var uitDoor = af ? null : uitgeslotenDoor(i, nu);
     /* Een vastgelegd tijdvak blijft zoals je het koos, ook als het advies
        intussen is verschoven. */
-    if (af && af.ingepland) { s = new Date(af.start); e = new Date(af.eind); }
-    var telbaar = teRegistreren(a) && !uitDoor;
+    if (af && (af.ingepland || af.programma)) {
+      s = new Date(af.start); e = new Date(af.eind);
+    }
+    /* Heeft de kaart programmaknoppen, dan registreren die; een tik op de kaart
+       zelf haalt alleen een gedane beurt weer weg. */
+    var metKnoppen = !!(a.programmas && a.programmas.length);
+    var telbaar = (metKnoppen ? !!af : teRegistreren(a)) && !uitDoor;
     html += '<div class="kaart ' + (af ? "gedaan" : uitDoor ? "uitgesloten" : t.klasse) +
       (telbaar ? " tikbaar" : "") + (AFBEELDINGEN[a.naam] ? " metplaat" : "") +
       '" data-i="' + i + '">' +
@@ -724,7 +806,8 @@ function toonApparaten(nu) {
       html += '<div><div class="doen gedaanregel">' +
         (af.ingepland
           ? (new Date(af.start) > nu ? "✓ Ingepland" : "✓ Gedraaid")
-          : "✓ Gedraaid om " + klokvan(new Date(af.tijd))) + "</div>" +
+          : "✓ Gedraaid om " + klokvan(new Date(af.tijd))) +
+        (af.programma ? " · " + af.programma : "") + "</div>" +
         '<div class="detail">' + besparingszin(af.bespaard) + "</div>" +
         "</div></div>";
     } else if (uitDoor) {
@@ -738,10 +821,43 @@ function toonApparaten(nu) {
           ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
             " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
           : "") +
+        (metKnoppen ? knoppenHtml(i, a) : "") +
         "</div></div>";
     }
   }
   houder.innerHTML = html;
+}
+
+/* De y-as. Een balk staat op 12 + 88 * (prijs - laagste) / bereik procent van de
+   hoogte, dus een prijs staat op dezelfde plek: de hulplijnen volgen dezelfde
+   som. Stappen van 1, 2, 5, 10... cent, zo dat er hooguit een stuk of vier
+   lijnen komen. Zonder lijn is een balk alleen relatief te lezen. */
+function toonAs(laagste, bereik) {
+  var onder = laagste - bereik * 12 / 88, boven = laagste + bereik;
+  var stappen = [0.01, 0.02, 0.05, 0.10, 0.20, 0.50, 1, 2, 5];
+  var stap = stappen[stappen.length - 1];
+  for (var s = 0; s < stappen.length; s++) {
+    if ((boven - onder) / stappen[s] <= 4) { stap = stappen[s]; break; }
+  }
+  var waarden = [];
+  for (var k = Math.ceil(onder / stap - 1e-9); k * stap <= boven + 1e-9; k++) {
+    var v = Math.round(k * stap * 100) / 100;
+    var plek = 12 + 88 * (v - laagste) / bereik;
+    /* Niet tegen de rand: het label zou over de uren eronder vallen. */
+    if (plek >= 8 && plek <= 96) waarden.push([v, plek]);
+  }
+  if (waarden.length < 2) {
+    waarden = [[laagste, 12], [boven, 100]];
+  }
+  var html = "";
+  for (var w = 0; w < waarden.length; w++) {
+    var tekst = (waarden[w][0] < 0 ? "\u2212" : "") +
+                euro(Math.abs(waarden[w][0]));
+    html += '<div class="asrij" style="bottom:' + waarden[w][1].toFixed(1) +
+      '%"></div><div class="aswaarde" style="bottom:' +
+      waarden[w][1].toFixed(1) + '%">' + tekst + "</div>";
+  }
+  document.getElementById("as").innerHTML = html;
 }
 
 function toonGrafiek(nu) {
@@ -773,6 +889,7 @@ function toonGrafiek(nu) {
     html += '<div class="' + klasse + '" style="height:' + hoogte.toFixed(1) + '%"></div>';
   }
   document.getElementById("balken").innerHTML = html;
+  toonAs(laagste, bereik);
 
   /* De reeks begint bij het huidige kwartier, dus de labels moeten uit de
      gegevens komen in plaats van uit een vaste reeks van nul tot 24. */
@@ -1170,7 +1287,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-10-20a";        // staat in het uitlegvenster
+var VERSIE = "2026-10-25a";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -1294,7 +1411,32 @@ function magDraaien(app, start, eind) {
 /* Buiten deze uren geen advies dat je 's nachts uit bed haalt. */
 var WEKUREN = [7, 22];
 
-function planApparaat(app, slots, nu, horizon) {
+/* Wat een beurt gemiddeld kost over alle toegestane starttijden op deze dag, in
+   kale meterprijzen. Zonder starttijd op die dag kijken we naar alle dagen. */
+function gemiddeldeKosten(app, duurMinuten, kwh, slots, nu, horizon, dag) {
+  var aantal = Math.round(duurMinuten / 15);
+  var afronding = config.bericht.afronden_op_minuten;
+  var som = 0, tel = 0;
+  for (var i = 0; i + aantal <= slots.length; i++) {
+    var start = slots[i].t;
+    var eind = new Date(start.getTime() + duurMinuten * 60000);
+    if (start < nu || eind > horizon) continue;
+    if (dag && dagsleutel(start) !== dag) continue;
+    if (start.getMinutes() % afronding !== 0) continue;
+    if (!magDraaien(app, start, eind)) continue;
+    for (var j = i; j < i + aantal; j++) som += slots[j].p * kwh / aantal;
+    tel++;
+  }
+  if (!tel) {
+    return dag ? gemiddeldeKosten(app, duurMinuten, kwh, slots, nu, horizon, null)
+               : null;
+  }
+  return som / tel;
+}
+
+/* De kaarten tonen het beste moment van vandaag (parameter dag); morgen zie je
+   in de grafiek. Is er vandaag niets meer te kiezen, dan kijken we verder. */
+function planApparaat(app, slots, nu, horizon, dag) {
   var aantal = Math.round(app.draaiduur_minuten / 15);
   var basislast = config.huis.basislast_watt;
   var energiePerSlot = app.verbruik_kwh / aantal;
@@ -1310,6 +1452,7 @@ function planApparaat(app, slots, nu, horizon) {
     var start = slots[i].t;
     var eind = new Date(start.getTime() + app.draaiduur_minuten * 60000);
     if (start < nu || eind > horizon) continue;
+    if (dag && dagsleutel(start) !== dag) continue;
     if (start.getMinutes() % afronding !== 0) continue;
     if (!magDraaien(app, start, eind)) continue;
 
@@ -1336,7 +1479,9 @@ function planApparaat(app, slots, nu, horizon) {
     }
     kandidaten.push([kosten, i, wekker, echt]);
   }
-  if (!kandidaten.length) return null;
+  if (!kandidaten.length) {
+    return dag ? planApparaat(app, slots, nu, horizon, null) : null;
+  }
 
   var beste = kandidaten[0];
   for (var k = 1; k < kandidaten.length; k++) {
@@ -1358,7 +1503,19 @@ function planApparaat(app, slots, nu, horizon) {
   for (var n = index; n < index + aantal; n++) {
     zon += Math.min(app.piek_watt, Math.max(0, slots[n].z - basislast));
   }
-  return {
+  var programmas = [];
+  var lijst = app.programma || [];
+  for (var q = 0; q < lijst.length; q++) {
+    var gem = gemiddeldeKosten(app, lijst[q].draaiduur_minuten,
+      lijst[q].verbruik_kwh, slots, nu, horizon, dag);
+    if (gem !== null) {
+      programmas.push({ naam: lijst[q].naam,
+                        duur_minuten: lijst[q].draaiduur_minuten,
+                        verbruik_kwh: lijst[q].verbruik_kwh,
+                        gemiddelde_kosten: Math.round(gem * 1000) / 1000 });
+    }
+  }
+  var resultaat = {
     naam: app.naam, emoji: app.emoji, keuzegroep: app.keuzegroep || "",
     start: slots[index].t.toISOString(),
     eind: new Date(slots[index].t.getTime() +
@@ -1371,6 +1528,11 @@ function planApparaat(app, slots, nu, horizon) {
     zon_deel: zon / (app.piek_watt * aantal),
     duur_minuten: app.draaiduur_minuten
   };
+  if (programmas.length) {
+    resultaat.programmas = programmas;
+    resultaat.uitstel_uren = app.uitstel_max_uren;
+  }
+  return resultaat;
 }
 
 var DAGNAMEN = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag",
@@ -1438,7 +1600,8 @@ function bereken() {
 
       var apparaten = [];
       for (var a = 0; a < config.apparaat.length; a++) {
-        var v = planApparaat(config.apparaat[a], slots, nu, horizon);
+        var v = planApparaat(config.apparaat[a], slots, nu, horizon,
+                             dagsleutel(nu));
         if (v) apparaten.push(v);
       }
 
@@ -1548,6 +1711,12 @@ document.getElementById("loginhoud").onclick = function (e) {
 document.getElementById("apparaten").onclick = function (e) {
   var el = e.target;
   while (el && el !== this) {
+    if (el.getAttribute && el.getAttribute("data-p") !== null) {
+      registreerProgramma(parseInt(el.getAttribute("data-i"), 10),
+        parseInt(el.getAttribute("data-p"), 10),
+        parseInt(el.getAttribute("data-u"), 10));
+      return;
+    }
     var k = typeof el.className === "string" ? el.className : "";
     if (k.indexOf("tikbaar") >= 0) {
       registreer(parseInt(el.getAttribute("data-i"), 10));

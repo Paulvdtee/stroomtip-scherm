@@ -1,5 +1,5 @@
 {
- "gemaakt": "2026-10-25T10:47:39+01:00",
+ "gemaakt": "2026-10-25T11:09:03+01:00",
  "dag": "2026-10-25",
  "dagnaam": "zondag",
  "duiding": "Weinig zon vandaag, dus dit is puur het goedkoopste dal.",
@@ -9,16 +9,31 @@
    "naam": "Vaatwasser",
    "emoji": "🍽️",
    "keuzegroep": "",
-   "start": "2026-10-25T11:00:00+01:00",
-   "eind": "2026-10-25T14:45:00+01:00",
+   "start": "2026-10-25T11:30:00+01:00",
+   "eind": "2026-10-25T15:15:00+01:00",
    "kosten": 0.14,
    "besparing": 0.14,
    "duurste_kosten": 0.28,
    "duurste_start": "2026-10-25T17:30:00+01:00",
-   "gemiddelde_kosten": 0.207,
+   "gemiddelde_kosten": 0.211,
    "verbruik_kwh": 1.039,
    "zon_deel": 0.0,
-   "duur_minuten": 225
+   "duur_minuten": 225,
+   "programmas": [
+    {
+     "naam": "Eco",
+     "duur_minuten": 225,
+     "verbruik_kwh": 1.039,
+     "gemiddelde_kosten": 0.211
+    },
+    {
+     "naam": "90 min",
+     "duur_minuten": 90,
+     "verbruik_kwh": 0.985,
+     "gemiddelde_kosten": 0.193
+    }
+   ],
+   "uitstel_uren": 3
   },
   {
    "naam": "Wassen",
@@ -30,7 +45,7 @@
    "besparing": 0.12,
    "duurste_kosten": 0.22,
    "duurste_start": "2026-10-25T17:30:00+01:00",
-   "gemiddelde_kosten": 0.157,
+   "gemiddelde_kosten": 0.159,
    "verbruik_kwh": 0.8,
    "zon_deel": 0.0,
    "duur_minuten": 150
@@ -39,24 +54,19 @@
    "naam": "Wassen + drogen",
    "emoji": "🧺",
    "keuzegroep": "was",
-   "start": "2026-10-25T11:00:00+01:00",
-   "eind": "2026-10-25T15:00:00+01:00",
+   "start": "2026-10-25T11:30:00+01:00",
+   "eind": "2026-10-25T15:30:00+01:00",
    "kosten": 0.59,
    "besparing": 0.6,
    "duurste_kosten": 1.2,
    "duurste_start": "2026-10-25T17:30:00+01:00",
-   "gemiddelde_kosten": 0.868,
+   "gemiddelde_kosten": 0.887,
    "verbruik_kwh": 4.5,
    "zon_deel": 0.0,
    "duur_minuten": 240
   }
  ],
  "prijzen": [
-  {
-   "t": "2026-10-25T10:45+01:00",
-   "p": 0.132,
-   "z": 272
-  },
   {
    "t": "2026-10-25T11:00+01:00",
    "p": 0.1319,
