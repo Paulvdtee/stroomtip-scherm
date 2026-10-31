@@ -156,16 +156,30 @@ body { display: flex; flex-direction: column; padding: 20px 24px 16px; }
             font-size: 13px; color: var(--gedempt);
             font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* De programmaknoppen op de vaatwasserkaart: wat je echt hebt gedaan. */
-.programmas { display: -webkit-box; display: flex; flex-wrap: wrap;
-              margin-top: 10px; }
-.pknop { width: 49%; margin-bottom: 8px; padding: 6px 4px 7px;
-         text-align: center; border: 2px solid var(--rand); border-radius: 12px;
-         background: rgba(26,33,43,.9); cursor: pointer; line-height: 1.15; }
-.pknop:nth-child(odd) { margin-right: 2%; }
-.pknop:active { background: var(--nu-dof); border-color: var(--nu); }
-.pknop .pnaam { font-size: 18px; font-weight: 700; }
-.pknop .puitstel { font-size: 14px; color: var(--gedempt); margin-top: 1px; }
+/* Het keuzepaneel: pas na een tik op de kaart. Rustig in ruststand, en de
+   keuzes komen op het moment dat je ze nodig hebt. */
+.keuze { margin-top: 10px; }
+/* Het tijdvak staat al op de eerste knop; weg is rustiger en geeft ruimte. */
+.kaart.open .wanneer, .kaart.open .venster { visibility: hidden; }
+.progkeuze { display: -webkit-box; display: flex; margin-bottom: 8px; }
+.progknop { -webkit-box-flex: 1; flex: 1 1 0; text-align: center; padding: 7px 4px;
+            font-size: 18px; font-weight: 700; border: 2px solid var(--rand);
+            background: rgba(26,33,43,.9); color: var(--gedempt); cursor: pointer; }
+.progknop:first-child { border-radius: 12px 0 0 12px; }
+.progknop:last-child { border-radius: 0 12px 12px 0; margin-left: -2px; }
+.progknop.gekozen { border-color: var(--nu); color: var(--tekst);
+                    background: var(--nu-dof); position: relative; }
+.kiesknop { margin-bottom: 8px; padding: 8px 12px 9px; text-align: left;
+            border: 2px solid var(--rand); border-radius: 12px;
+            background: rgba(26,33,43,.9); cursor: pointer; line-height: 1.2; }
+.kiesknop.ideaal { border-color: var(--nu); }
+.kiesknop:active { background: var(--nu-dof); border-color: var(--nu); }
+.kiesknop.uit { opacity: .45; cursor: default; }
+.kiesknop .knaam { font-size: 20px; font-weight: 700; }
+.kiesknop .ksub { font-size: 15px; color: var(--gedempt); margin-top: 2px;
+                  font-variant-numeric: tabular-nums; }
+.keuzeterug { font-size: 16px; color: var(--gedempt); text-decoration: underline;
+              cursor: pointer; padding: 4px 0; display: inline-block; }
 
 .voet { display: flex; justify-content: space-between; align-items: baseline;
         margin-top: 6px; font-size: 18px; color: var(--gedempt); }
@@ -289,10 +303,10 @@ body.nacht { filter: brightness(.42); }
 
       <div class="punt"><div class="teken">✓</div><div>
         <h3>Tik erop als je hem aanzet</h3>
-        <p>Dan onthoudt het scherm die beurt en telt het op wat hij scheelde
-          ten opzichte van een doorsnee moment. Bij de vaatwasser kies je
-          het programma en of je hem nu of met uitstel start, want dat is niet
-          altijd het geadviseerde tijdvak. Onderin staat de stand;
+        <p>Je kiest dan of je hem in het ideale tijdvak
+          aanzet of nu (bij de vaatwasser ook welk programma, en eventueel met
+          uitstel). Het scherm onthoudt die beurt en telt op wat hij scheelde
+          ten opzichte van een doorsnee moment. Onderin staat de stand;
           <b>tik daarop</b> voor het hele overzicht. Vergist? Nog een keer
           tikken haalt hem weer weg.</p>
       </div></div>
@@ -531,103 +545,146 @@ function besparingszin(bespaard) {
   return "Even duur als een doorsnee moment.";
 }
 
-/* Een tik registreert de beurt; nog een tik neemt hem terug. Aan de muur is
-   een misklik zo gezet, en die moet je kunnen herstellen.
-
-   Ligt het tijdvak op de kaart nog in het verschiet, dan leg je dat tijdvak vast
-   (bijvoorbeeld de uitgestelde start van de vaatwasser), tegen de kosten van
-   dat tijdvak. Is het blok al begonnen of voorbij, dan tellen de kosten van het
-   moment van tikken. */
-function registreer(index) {
+/* Een tik op een kaart opent de keuze: het geadviseerde tijdvak of nu (bij de
+   vaatwasser ook het programma en uitstel). Pas de keuze registreert. Is de beurt
+   al geregistreerd, dan haalt een tik hem weer weg: aan de muur is een misklik
+   zo gezet, en die moet je kunnen herstellen. */
+function neemTerug(index) {
   if (!gegevens || !gegevens.apparaten) return;
   var a = gegevens.apparaten[index];
-  if (!teRegistreren(a)) return;
-  var nu = new Date();
+  if (!a) return;
+  var af = beurtVoorKaart(a, new Date());
+  if (!af) return;
   var lijst = logLezen();
-  var af = beurtVoorKaart(a, nu);
-  if (!af && uitgeslotenDoor(index, nu)) return;
-  if (af) {
-    for (var i = 0; i < lijst.length; i++) {
-      if (lijst[i].naam === af.naam && lijst[i].tijd === af.tijd) {
-        lijst.splice(i, 1);
-        break;
-      }
+  for (var i = 0; i < lijst.length; i++) {
+    if (lijst[i].naam === af.naam && lijst[i].tijd === af.tijd) {
+      lijst.splice(i, 1);
+      break;
     }
-    logSchrijven(lijst);
-    meetGebeurtenis(a.naam, "weg");
-    tekenen();
-    return;
   }
-  var start = new Date(a.start);
-  var ingepland = start > nu;
-  var kosten, tijd;
-  if (ingepland) {
-    kosten = a.kosten;
-    tijd = start;
-  } else {
-    /* Wat hij nu kost, niet wat het geplande venster kostte: je kunt ook
-       buiten het venster op de kaart tikken, en dan hoort daar het eerlijke
-       bedrag bij. Lukt dat niet, dan valt het terug op het venster zelf. */
-    kosten = kostenVanaf(nu, a.duur_minuten, a.verbruik_kwh);
-    if (kosten === null) kosten = a.kosten;
-    tijd = nu;
-  }
-  if (typeof kosten !== "number") return;
-  var beurt = {
-    dag: dagsleutel(tijd),
-    tijd: tijd.toISOString(),
-    naam: a.naam,
-    emoji: a.emoji || "",
-    kwh: a.verbruik_kwh,
-    kosten: kosten,
-    referentie: a.gemiddelde_kosten,
-    bespaard: a.gemiddelde_kosten - kosten
-  };
-  /* Het tijdvak ligt vast op het moment van tikken, ook als het advies later
-     verschuift. */
-  if (ingepland) {
-    beurt.ingepland = true;
-    beurt.start = a.start;
-    beurt.eind = a.eind;
-  }
-  lijst.push(beurt);
   logSchrijven(lijst);
-  meetGebeurtenis(a.naam, "aan");
+  meetGebeurtenis(a.naam, "weg");
   tekenen();
 }
 
-/* Een tik op een programmaknop: de beurt zoals je hem werkelijk zet, dus vanaf
-   nu of vanaf over zoveel uur, met de duur en het verbruik van dat programma.
-   Hij hoeft dus niet in het geadviseerde tijdvak te vallen. */
-function registreerProgramma(index, pi, uitstelUren) {
+/* Wat doet een keuze? Eén som voor wat de knop toont en wat er vastgelegd wordt,
+   zodat die twee nooit uit elkaar lopen. Het geadviseerde tijdvak bestaat alleen
+   als het nog komt; is het al begonnen of voorbij, dan is "nu" de enige keuze.
+   Kosten zijn de kale kwartierprijzen vanaf het startmoment, zonder zonweging. */
+function keuzeUitkomst(a, prog, wanneer, nu) {
+  var duur = prog ? prog.duur_minuten : a.duur_minuten;
+  var kwh = prog ? prog.verbruik_kwh : a.verbruik_kwh;
+  var start;
+  if (wanneer === "ideaal") start = new Date(a.start);
+  else if (wanneer === "uitstel") start = new Date(nu.getTime() + (a.uitstel_uren || 0) * 3600000);
+  else start = nu;
+  var kosten;
+  /* Zonder programma is het kaartbedrag het bedrag van het geadviseerde tijdvak. */
+  if (wanneer === "ideaal" && !prog) kosten = a.kosten;
+  else kosten = kostenVanaf(start, duur, kwh);
+  if (typeof kosten !== "number") kosten = null;
+  return { start: start, eind: new Date(start.getTime() + duur * 60000),
+           kosten: kosten,
+           referentie: prog ? prog.gemiddelde_kosten : a.gemiddelde_kosten,
+           kwh: kwh };
+}
+
+function registreerKeuze(index, wanneer) {
   if (!gegevens || !gegevens.apparaten) return;
   var a = gegevens.apparaten[index];
-  var prog = a && a.programmas ? a.programmas[pi] : null;
-  if (!prog || typeof prog.gemiddelde_kosten !== "number") return;
+  if (!a) return;
+  var metProg = !!(a.programmas && a.programmas.length);
+  var prog = null;
+  if (metProg) {
+    var pi = keuze && keuze.index === index ? keuze.programma : 0;
+    prog = a.programmas[pi];
+    if (!prog || typeof prog.gemiddelde_kosten !== "number") return;
+  } else if (!teRegistreren(a)) {
+    return;
+  }
   var nu = new Date();
   if (beurtVoorKaart(a, nu) || uitgeslotenDoor(index, nu)) return;
-  var start = new Date(nu.getTime() + uitstelUren * 3600000);
-  var kosten = kostenVanaf(start, prog.duur_minuten, prog.verbruik_kwh);
-  if (kosten === null) return;
+  if (wanneer === "ideaal" && !(new Date(a.start) > nu)) wanneer = "nu";
+  var u = keuzeUitkomst(a, prog, wanneer, nu);
+  if (u.kosten === null || typeof u.referentie !== "number") return;
+  var ingepland = wanneer !== "nu" && u.start > nu;
   var beurt = {
-    dag: dagsleutel(start),
-    tijd: start.toISOString(),
+    dag: dagsleutel(u.start),
+    tijd: u.start.toISOString(),
     naam: a.naam,
     emoji: a.emoji || "",
-    programma: prog.naam,
-    kwh: prog.verbruik_kwh,
-    kosten: kosten,
-    referentie: prog.gemiddelde_kosten,
-    bespaard: prog.gemiddelde_kosten - kosten,
-    start: start.toISOString(),
-    eind: new Date(start.getTime() + prog.duur_minuten * 60000).toISOString()
+    kwh: u.kwh,
+    kosten: u.kosten,
+    referentie: u.referentie,
+    bespaard: u.referentie - u.kosten
   };
-  if (uitstelUren > 0) beurt.ingepland = true;
+  if (prog) beurt.programma = prog.naam;
+  /* Het tijdvak ligt vast op het moment van kiezen, ook als het advies later
+     verschuift. */
+  if (prog || ingepland) {
+    beurt.start = u.start.toISOString();
+    beurt.eind = u.eind.toISOString();
+  }
+  if (ingepland) beurt.ingepland = true;
   var lijst = logLezen();
   lijst.push(beurt);
   logSchrijven(lijst);
   meetGebeurtenis(a.naam, "aan");
+  sluitKeuze();
   tekenen();
+}
+
+/* ---- De keuzestap ------------------------------------------------------ */
+var keuze = null;          // { index, programma } zolang het paneel openstaat
+var keuzeTimer = null;
+
+function sluitKeuze() {
+  keuze = null;
+  if (keuzeTimer) { clearTimeout(keuzeTimer); keuzeTimer = null; }
+}
+
+/* Aan de muur blijft een open paneel anders eindeloos staan. */
+function openKeuze(index, programma) {
+  keuze = { index: index, programma: programma || 0 };
+  if (keuzeTimer) clearTimeout(keuzeTimer);
+  keuzeTimer = setTimeout(function () { sluitKeuze(); tekenen(); }, 30000);
+  tekenen();
+}
+
+function kanKiezen(a) {
+  return !!(a.programmas && a.programmas.length) || teRegistreren(a);
+}
+
+function kiesknopHtml(a, prog, wanneer, naam, nu) {
+  var u = keuzeUitkomst(a, prog, wanneer, nu);
+  var voor = wanneer === "nu" ? "" : dagvoorvoegsel(u.start, nu);
+  var sub = u.kosten === null
+    ? "prijs nog niet bekend"
+    : voor + klokvan(u.start) + "–" + klokvan(u.eind) + " · " + euro(u.kosten);
+  return '<div class="kiesknop' + (wanneer === "ideaal" ? " ideaal" : "") +
+    (u.kosten === null ? " uit" : "") + '" data-keuze="' + wanneer + '" data-i="' +
+    gegevens.apparaten.indexOf(a) + '"><div class="knaam">' + naam +
+    '</div><div class="ksub">' + sub + "</div></div>";
+}
+
+function keuzeHtml(index, a, nu) {
+  var metProg = !!(a.programmas && a.programmas.length);
+  var prog = metProg ? a.programmas[keuze.programma] || a.programmas[0] : null;
+  var html = '<div class="keuze">';
+  if (metProg) {
+    html += '<div class="progkeuze">';
+    for (var p = 0; p < a.programmas.length; p++) {
+      html += '<div class="progknop' + (a.programmas[p] === prog ? " gekozen" : "") +
+        '" data-i="' + index + '" data-prog="' + p + '">' + a.programmas[p].naam + "</div>";
+    }
+    html += "</div>";
+  }
+  if (new Date(a.start) > nu) html += kiesknopHtml(a, prog, "ideaal", "Ideale tijdvak", nu);
+  html += kiesknopHtml(a, prog, "nu", "Nu", nu);
+  if (metProg && a.uitstel_uren) {
+    html += kiesknopHtml(a, prog, "uitstel", "Over " + a.uitstel_uren + " uur", nu);
+  }
+  return html + '<span class="keuzeterug" data-sluit="1">Annuleer</span></div>';
 }
 
 function logTotaal(vanaf) {
@@ -701,7 +758,7 @@ function toonLogboek() {
 
   if (!lijst.length) {
     html += '<p class="loguitleg">Tik op het scherm op de was, of kies bij de ' +
-      "vaatwasser je programma, zodra je hem aanzet, ook als je hem uitgesteld laat starten. Dan noteren we wat die beurt kost en " +
+      "vaatwasser ook je programma, en kies of je hem nu of in het ideale tijdvak aanzet. Dan noteren we wat die beurt kost en " +
       "wat hij gemiddeld gekost zou hebben, en groeit deze teller vanzelf.</p>";
   } else {
     html += '<div class="logtabel">';
@@ -742,23 +799,6 @@ function wisBeurt(tijd) {
   tekenen();
 }
 
-/* Per programma een knop zonder uitstel en een met. Met de uitstelknop startte
-   je hem straks vanzelf, dus die beurt telt vanaf dan. */
-function knoppenHtml(index, a) {
-  var html = '<div class="programmas">';
-  for (var p = 0; p < a.programmas.length; p++) {
-    var uren = [0, a.uitstel_uren || 0];
-    for (var u = 0; u < uren.length; u++) {
-      if (u === 1 && !uren[1]) continue;
-      html += '<div class="pknop" data-i="' + index + '" data-p="' + p +
-        '" data-u="' + uren[u] + '"><div class="pnaam">' +
-        a.programmas[p].naam + '</div><div class="puitstel">' +
-        (uren[u] ? "over " + uren[u] + " uur" : "nu") + "</div></div>";
-    }
-  }
-  return html + "</div>";
-}
-
 function toonApparaten(nu) {
   var houder = document.getElementById("apparaten");
   houder.className = "apparaten" +
@@ -785,12 +825,11 @@ function toonApparaten(nu) {
     if (af && (af.ingepland || af.programma)) {
       s = new Date(af.start); e = new Date(af.eind);
     }
-    /* Heeft de kaart programmaknoppen, dan registreren die; een tik op de kaart
-       zelf haalt alleen een gedane beurt weer weg. */
-    var metKnoppen = !!(a.programmas && a.programmas.length);
-    var telbaar = (metKnoppen ? !!af : teRegistreren(a)) && !uitDoor;
+    /* Een tik opent de keuze; is de beurt al gedaan, dan haalt hij hem weg. */
+    var open = !!(keuze && keuze.index === i && !af && !uitDoor);
+    var telbaar = (af || kanKiezen(a)) && !uitDoor && !open;
     html += '<div class="kaart ' + (af ? "gedaan" : uitDoor ? "uitgesloten" : t.klasse) +
-      (telbaar ? " tikbaar" : "") + (AFBEELDINGEN[a.naam] ? " metplaat" : "") +
+      (telbaar ? " tikbaar" : "") + (open ? " open" : "") + (AFBEELDINGEN[a.naam] ? " metplaat" : "") +
       '" data-i="' + i + '">' +
       (AFBEELDINGEN[a.naam] ? '<div class="plaat" style="background-image:url(' +
         AFBEELDINGEN[a.naam] + ')"></div>' : "") +
@@ -812,6 +851,8 @@ function toonApparaten(nu) {
         "</div></div>";
     } else if (uitDoor) {
       html += '</div><div class="melding">' + uitsluitzin(uitDoor, nu) + "</div></div>";
+    } else if (open) {
+      html += "<div>" + keuzeHtml(i, a, nu) + "</div></div>";
     } else {
       html += '<div><div class="doen' + (t.wacht ? " wachten" : "") + '">' +
         t.doen + "</div>" +
@@ -821,7 +862,6 @@ function toonApparaten(nu) {
           ? '<div class="detail">Om ' + klokvan(new Date(a.duurste_start)) +
             " was dezelfde beurt " + euro(a.duurste_kosten) + " geweest.</div>"
           : "") +
-        (metKnoppen ? knoppenHtml(i, a) : "") +
         "</div></div>";
     }
   }
@@ -1287,7 +1327,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-10-25a";        // staat in het uitlegvenster
+var VERSIE = "2026-10-31a";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -1705,25 +1745,46 @@ document.getElementById("loginhoud").onclick = function (e) {
   if (tijd) wisBeurt(tijd);
 };
 
-/* Tikken op een apparaat vinkt de beurt af. De kaarten worden elke tien
-   seconden opnieuw getekend, dus de afhandeling hangt aan de houder eromheen
-   en niet aan de kaarten zelf. */
+/* Tikken op een kaart opent de keuze; een keuze registreert de beurt. De kaarten
+   worden elke tien seconden opnieuw getekend, dus de afhandeling hangt aan de
+   houder eromheen en niet aan de kaarten zelf. */
 document.getElementById("apparaten").onclick = function (e) {
+  /* Na een tik worden de kaarten opnieuw getekend; zonder dit denkt de
+     controle hieronder dat de tik buiten de kaarten viel. */
+  e.stopPropagation();
   var el = e.target;
+  function attr(naam) { return el.getAttribute ? el.getAttribute(naam) : null; }
   while (el && el !== this) {
-    if (el.getAttribute && el.getAttribute("data-p") !== null) {
-      registreerProgramma(parseInt(el.getAttribute("data-i"), 10),
-        parseInt(el.getAttribute("data-p"), 10),
-        parseInt(el.getAttribute("data-u"), 10));
+    if (attr("data-sluit") !== null) { sluitKeuze(); tekenen(); return; }
+    if (attr("data-prog") !== null) {
+      openKeuze(parseInt(attr("data-i"), 10), parseInt(attr("data-prog"), 10));
+      return;
+    }
+    if (attr("data-keuze") !== null) {
+      if (el.className.indexOf("uit") < 0) {
+        registreerKeuze(parseInt(attr("data-i"), 10), attr("data-keuze"));
+      }
       return;
     }
     var k = typeof el.className === "string" ? el.className : "";
     if (k.indexOf("tikbaar") >= 0) {
-      registreer(parseInt(el.getAttribute("data-i"), 10));
+      var i = parseInt(attr("data-i"), 10);
+      var a = gegevens && gegevens.apparaten ? gegevens.apparaten[i] : null;
+      if (a && beurtVoorKaart(a, new Date())) { neemTerug(i); }
+      else { openKeuze(i, 0); }
       return;
     }
     el = el.parentNode;
   }
+};
+/* Een tik buiten de kaarten sluit een open keuze weer. */
+document.onclick = function (e) {
+  var el = e.target;
+  while (el) {
+    if (el.id === "apparaten") return;
+    el = el.parentNode;
+  }
+  if (keuze) { sluitKeuze(); tekenen(); }
 };
 
 function vernieuwen() {
