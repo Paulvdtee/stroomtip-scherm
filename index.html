@@ -1191,7 +1191,13 @@ function tekenen() {
                 tweecijfers(nu.getDate());
   var stilTe = opgehaaldOm ? (Date.now() - opgehaaldOm) / 60000 : 999;
 
-  if (!token()) {
+  if (NAS && NAS_VERVERST && Date.now() - NAS_VERVERST > 20 * 60000) {
+    /* Het advies verandert zelden, dus het tijdstip van het advies zegt niets
+       over of de NAS nog meerekent. De hartslag van de verversing wel. */
+    status.className = "oud";
+    status.textContent = "de NAS vernieuwt het advies niet meer, laatste keer om " +
+      klokvan(new Date(NAS_VERVERST));
+  } else if (!NAS && !token()) {
     status.className = "oud";
     status.textContent = "geen token op dit apparaat — advies komt uit een " +
       "bestand dat twee keer per dag ververst";
@@ -1214,7 +1220,15 @@ function tekenen() {
 
 /* ---- Live meting via de Tibber Pulse ----------------------------------
    Het token staat alleen in de browser van deze iPad, nooit in de openbare
-   repo. Wie de pagina elders opent ziet dit blok simpelweg niet. */
+   repo. Wie de pagina elders opent ziet dit blok simpelweg niet.
+
+   Op de NAS is het anders: daar meldt de webserver zichzelf met
+   window.STROOMTIP_NAS. Het token staat dan op de NAS, het advies komt uit
+   data.json (elke vijf minuten vernieuwd) en het live-getal van /live. De
+   pagina heeft daar geen token nodig en vraagt er ook niet om. */
+
+var NAS = window.STROOMTIP_NAS === true;
+var NAS_VERVERST = 0;      // wanneer de NAS het advies voor het laatst vernieuwde
 
 var WS_ADRES = "wss://websocket-api.tibber.com/v1-beta/gql/subscriptions";
 var huis = null;
@@ -1226,6 +1240,7 @@ var herverbindNa = 3000;
 var tokenOngeldig = false;
 
 function token() {
+  if (NAS) return "";   // op de NAS rekent de NAS, niet deze pagina
   try { return localStorage.getItem("tibber_token") || ""; } catch (e) { return ""; }
 }
 
@@ -1343,7 +1358,7 @@ window.addEventListener("pagehide", meetBewaar);
 
 function toonLive(nu) {
   var houder = document.getElementById("live");
-  if (!token() || tokenOngeldig) {
+  if (!NAS && (!token() || tokenOngeldig)) {
     houder.innerHTML = (tokenOngeldig
         ? '<div class="meting" style="flex:0 0 300px"><div class="bij oud">' +
           "Dit token wordt niet geaccepteerd.</div><div class=\"stand\">" +
@@ -1434,7 +1449,40 @@ function zoekHuis(klaar) {
   v.send(JSON.stringify({ query: "{ viewer { homes { id } } }" }));
 }
 
+/* Op de NAS: de luisteraar daar heeft de verbinding met de Pulse open, wij
+   vragen alleen elke paar seconden wat hij het laatst zag. De leeftijd van die
+   meting komt mee, zodat "verbinding kwijt" klopt als de Pulse stil is, en niet
+   pas als de NAS zelf niet meer antwoordt. */
+var nasLaatsteTs = "";
+function naslive() {
+  var v = new XMLHttpRequest();
+  v.open("GET", "live?t=" + Date.now(), true);
+  v.timeout = 8000;
+  var volgende = function () { toonLive(new Date()); setTimeout(naslive, 3000); };
+  v.onload = function () {
+    if (v.status === 200) {
+      try {
+        var m = JSON.parse(v.responseText);
+        meting = { power: m.power, powerProduction: m.powerProduction,
+                   accumulatedConsumption: m.accumulatedConsumption,
+                   accumulatedProduction: m.accumulatedProduction,
+                   accumulatedCost: m.accumulatedCost };
+        metingOm = Date.now() - m.leeftijd_s * 1000;
+        if (m.ts !== nasLaatsteTs) {   // alleen echt nieuwe metingen tellen mee
+          nasLaatsteTs = m.ts;
+          meetNoteer(new Date(), m.power - (m.powerProduction || 0));
+        }
+      } catch (e) {}
+    }
+    volgende();
+  };
+  v.onerror = volgende;
+  v.ontimeout = volgende;
+  v.send();
+}
+
 function verbind() {
+  if (NAS) { naslive(); return; }
   if (!token() || !window.WebSocket) return;
   if (!huis) { zoekHuis(verbind); return; }
   try { socket = new WebSocket(WS_ADRES, "graphql-transport-ws"); }
@@ -1509,6 +1557,8 @@ function ophalen() {
       try {
         gegevens = JSON.parse(verzoek.responseText);
         opgehaaldOm = Date.now();
+        var hartslag = parseInt(verzoek.getResponseHeader("X-Ververst"), 10);
+        if (hartslag) NAS_VERVERST = hartslag;
         try { localStorage.setItem("stroomtip", verzoek.responseText); } catch (e) {}
       } catch (e) {}
     }
@@ -1533,7 +1583,7 @@ try {
    en het advies is daardoor altijd van dit moment in plaats van van het
    laatste half uur. Dezelfde som als aan de Python-kant. */
 
-var VERSIE = "2026-10-31d";        // staat in het uitlegvenster
+var VERSIE = "2026-11-09a";        // staat in het uitlegvenster
 var config = null;
 var TIBBER = "https://api.tibber.com/v1-beta/gql";
 var laatsteFout = null;
@@ -1891,7 +1941,8 @@ var sluier = document.getElementById("sluier");
 function toonUitleg(aan) { sluier.style.display = aan ? "block" : "none"; }
 document.getElementById("versie").textContent =
   "versie " + VERSIE + " \u00b7 " +
-  (token() ? "token aanwezig, rekent zelf" : "geen token, gebruikt bestand");
+  (NAS ? "advies en live-getal van de NAS"
+       : token() ? "token aanwezig, rekent zelf" : "geen token, gebruikt bestand");
 document.getElementById("ververs").onclick = function () {
   window.location.replace(window.location.pathname + "?v=" + Date.now());
 };
